@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Kiro Remote</title>
+  <link rel="manifest" href="/manifest.json" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117; --bg2: #161b22; --bg3: #1c2128;
+      --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+      --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+      --yellow: #d29922; --purple: #bc8cff;
+      --mono: 'SF Mono','Fira Code',Consolas,monospace;
+      --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    }
+    html,body { height:100%; background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; overflow:hidden; }
+    #app { display:flex; flex-direction:column; height:100%; height:100dvh; padding-bottom:env(safe-area-inset-bottom); }
+
+    /* HEADER */
+    #header { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--bg2); border-bottom:1px solid var(--border); }
+    #header-left { display:flex; align-items:center; gap:8px; }
+    #status-dot { width:9px; height:9px; border-radius:50%; background:var(--red); transition:background .3s; flex-shrink:0; }
+    #status-dot.connected { background:var(--green); }
+    #app-name { font-weight:700; font-size:15px; }
+    #machine-info { font-size:11px; color:var(--text2); font-family:var(--mono); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    /* AGENT STATE BAR */
+    #state-bar { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--bg3); border-bottom:1px solid var(--border); }
+    #agent-badge { padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; font-family:var(--mono); border:1px solid var(--border); color:var(--text2); background:var(--bg2); }
+    #agent-badge.running { color:var(--accent); border-color:var(--accent); background:rgba(88,166,255,.08); }
+    #agent-badge.waiting { color:var(--yellow); border-color:var(--yellow); background:rgba(210,153,34,.1); animation:pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    #current-task { flex:1; font-size:12px; color:var(--text2); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* TABS */
+    #tabs { flex-shrink:0; display:flex; background:var(--bg2); border-bottom:1px solid var(--border); }
+    .tab { flex:1; padding:9px 0; text-align:center; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:color .2s,border-color .2s; -webkit-tap-highlight-color:transparent; }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+    /* PANELS */
+    #panels { flex:1; overflow:hidden; position:relative; }
+    .panel { position:absolute; inset:0; overflow-y:auto; -webkit-overflow-scrolling:touch; display:none; }
+    .panel.active { display:block; }
+    .panel::-webkit-scrollbar { width:3px; } .panel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+    /* ACTIVITY PANEL */
+    #panel-activity { padding:8px 0; }
+    .entry { display:flex; gap:10px; padding:8px 14px; border-bottom:1px solid rgba(48,54,61,.4); animation:fadeIn .2s ease; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(-3px)} to{opacity:1;transform:none} }
+    .entry-icon { font-size:14px; width:20px; text-align:center; flex-shrink:0; margin-top:1px; }
+    .entry-body { flex:1; min-width:0; }
+    .entry-text { font-size:13px; color:var(--text); word-break:break-word; line-height:1.4; }
+    .entry-text.tool { font-family:var(--mono); font-size:11px; color:var(--text2); }
+    .entry-time { font-size:10px; color:var(--text2); opacity:.5; margin-top:2px; font-family:var(--mono); }
+    .entry-badge { display:inline-block; font-size:10px; font-family:var(--mono); padding:1px 5px; border-radius:3px; margin-right:4px; }
+    .badge-tool { background:rgba(88,166,255,.15); color:var(--accent); }
+    .badge-approve { background:rgba(63,185,80,.15); color:var(--green); }
+    .badge-deny { background:rgba(248,81,73,.15); color:var(--red); }
+    #empty-activity { padding:40px 20px; text-align:center; color:var(--text2); opacity:.5; font-size:13px; }
+
+    /* CHAT PANEL */
+    #panel-chat { display:flex; flex-direction:column; }
+    #panel-chat.active { display:flex; }
+    #chat-messages { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 14px; display:flex; flex-direction:column; gap:10px; }
+    #chat-messages::-webkit-scrollbar { width:3px; } #chat-messages::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+    .chat-msg { max-width:88%; }
+    .chat-msg.from-phone { align-self:flex-end; }
+    .chat-msg.from-kiro { align-self:flex-start; }
+    .chat-bubble { padding:9px 13px; border-radius:14px; font-size:13px; line-height:1.5; word-break:break-word; }
+    .from-phone .chat-bubble { background:var(--accent); color:#0d1117; border-bottom-right-radius:4px; }
+    .from-kiro .chat-bubble { background:var(--bg3); color:var(--text); border:1px solid var(--border); border-bottom-left-radius:4px; }
+    .chat-meta { font-size:10px; color:var(--text2); margin-top:3px; font-family:var(--mono); }
+    .from-phone .chat-meta { text-align:right; }
+    #chat-empty { padding:40px 20px; text-align:center; color:var(--text2); opacity:.5; font-size:13px; }
+    #chat-hint { padding:8px 14px; font-size:11px; color:var(--text2); text-align:center; border-bottom:1px solid var(--border); background:var(--bg3); flex-shrink:0; }
+
+    /* INPUT BAR */
+    #input-bar { flex-shrink:0; display:flex; gap:8px; padding:9px 14px; padding-bottom:max(9px,env(safe-area-inset-bottom,9px)); background:var(--bg2); border-top:1px solid var(--border); }
+    #msg-input { flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:22px; color:var(--text); font-size:14px; padding:9px 16px; outline:none; -webkit-appearance:none; transition:border-color .2s; }
+    #msg-input:focus { border-color:var(--accent); }
+    #msg-input::placeholder { color:var(--text2); opacity:.5; }
+    #send-btn { width:38px; height:38px; border:none; border-radius:50%; background:var(--accent); color:#0d1117; font-size:18px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s,transform .1s; -webkit-tap-highlight-color:transparent; }
+    #send-btn:active { opacity:.8; transform:scale(.95); }
+    #send-feedback { font-size:11px; color:var(--green); padding:0 14px 5px; height:16px; flex-shrink:0; }
+
+    /* APPROVAL MODAL */
+    #approval-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:100; flex-direction:column; align-items:stretch; justify-content:flex-end; backdrop-filter:blur(4px); }
+    #approval-modal.visible { display:flex; }
+    #approval-sheet { background:var(--bg2); border-top:1px solid var(--border); border-radius:18px 18px 0 0; padding:18px 18px max(18px,env(safe-area-inset-bottom,18px)); max-height:88vh; overflow-y:auto; animation:slideUp .22s ease; }
+    @keyframes slideUp { from{transform:translateY(100%)} to{transform:none} }
+    #approval-handle { width:36px; height:4px; background:var(--border); border-radius:2px; margin:0 auto 14px; }
+    #approval-title { font-size:12px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--yellow); margin-bottom:6px; }
+    #approval-tool-line { font-size:16px; font-weight:700; margin-bottom:10px; }
+    #approval-tool-line span { font-family:var(--mono); color:var(--accent); font-size:14px; }
+    #approval-cmd { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-family:var(--mono); font-size:11px; color:var(--text); word-break:break-all; white-space:pre-wrap; max-height:160px; overflow-y:auto; margin-bottom:10px; line-height:1.5; }
+    #approval-ctx { font-size:12px; color:var(--text2); margin-bottom:10px; font-family:var(--mono); word-break:break-word; }
+    #timer-wrap { height:3px; background:var(--bg3); border-radius:2px; overflow:hidden; margin-bottom:5px; }
+    #timer-bar { height:100%; background:var(--yellow); border-radius:2px; width:100%; transition:width linear; }
+    #timer-label { font-size:11px; color:var(--text2); text-align:right; margin-bottom:14px; font-family:var(--mono); }
+    #approval-btns { display:flex; gap:10px; }
+    .abtn { flex:1; padding:15px; border:none; border-radius:12px; font-size:15px; font-weight:700; cursor:pointer; transition:opacity .15s,transform .1s; -webkit-tap-highlight-color:transparent; }
+    .abtn:active { opacity:.8; transform:scale(.97); }
+    #btn-approve { background:var(--green); color:#0d1117; }
+    #btn-deny { background:var(--red); color:#fff; }
+
+    /* NO TOKEN */
+    #no-token { display:none; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:32px; text-align:center; gap:12px; }
+    #no-token.visible { display:flex; }
+    #no-token h2 { font-size:20px; } #no-token p { font-size:14px; color:var(--text2); line-height:1.6; }
+    #no-token code { font-family:var(--mono); background:var(--bg2); border:1px solid var(--border); padding:2px 6px; border-radius:4px; }
+  </style>
+</head>
+<body>
+
+<div id="no-token"><div style="font-size:48px">📱</div><h2>Kiro Remote</h2><p>No session token.<br/>Scan the QR code from Kiro IDE<br/>or open the URL with <code>?token=XXXXXX</code></p></div>
+
+<div id="app">
+  <div id="header">
+    <div id="header-left">
+      <div id="status-dot"></div>
+      <div><div id="app-name">Kiro Remote</div><div id="machine-info">Connecting…</div></div>
+    </div>
+    <div style="font-size:18px;opacity:.5">⌨️</div>
+  </div>
+
+  <div id="state-bar">
+    <div id="agent-badge" class="idle">IDLE</div>
+    <div id="current-task"></div>
+  </div>
+
+  <div id="tabs">
+    <div class="tab active" data-panel="chat">💬 Chat</div>
+    <div class="tab" data-panel="activity">📋 Activity</div>
+  </div>
+
+  <div id="panels">
+    <!-- Chat panel -->
+    <div class="panel active" id="panel-chat">
+      <div id="chat-hint">Type below to send a message to Kiro ↓</div>
+      <div id="chat-messages"><div id="chat-empty">No messages yet.<br/>Start chatting with Kiro from your phone.</div></div>
+    </div>
+
+    <!-- Activity panel -->
+    <div class="panel" id="panel-activity">
+      <div id="activity-feed"><div id="empty-activity">No activity yet.<br/>Start an agent task in Kiro to see events here.</div></div>
+    </div>
+  </div>
+
+  <div id="send-feedback"></div>
+  <div id="input-bar">
+    <input id="msg-input" type="text" placeholder="Message Kiro…" autocomplete="off" autocorrect="off" spellcheck="false" />
+    <button id="send-btn" aria-label="Send">➤</button>
+  </div>
+</div>
+
+<!-- Approval Modal -->
+<div id="approval-modal" role="dialog" aria-modal="true">
+  <div id="approval-sheet">
+    <div id="approval-handle"></div>
+    <div id="approval-title">⚠️ Approval Required</div>
+    <div id="approval-tool-line">Tool: <span id="approval-tool-name"></span></div>
+    <pre id="approval-cmd"></pre>
+    <div id="approval-ctx" hidden></div>
+    <div id="timer-wrap"><div id="timer-bar"></div></div>
+    <div id="timer-label"></div>
+    <div id="approval-btns">
+      <button class="abtn" id="btn-deny">❌ Deny</button>
+      <button class="abtn" id="btn-approve">✅ Approve</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const params = new URLSearchParams(location.search);
+const token = params.get('token');
+const MAX_ACTIVITY = 100;
+let ws = null, wsRetryTimer = null;
+let currentApprovalId = null, approvalTimerInterval = null;
+let activePanel = 'chat';
+
+if (!token) {
+  document.getElementById('no-token').classList.add('visible');
+  document.getElementById('app').style.display = 'none';
+} else {
+  registerSW();
+  connectWS();
+  setupTabs();
+  setupInput();
+}
+
+function registerSW() {
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// ── WebSocket ────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/mobile?token=${token}`);
+  ws.onopen = () => { setConnected(true); if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; } };
+  ws.onclose = () => { setConnected(false); wsRetryTimer = setTimeout(connectWS, 3000); };
+  ws.onerror = () => {};
+  ws.onmessage = (e) => { try { handleMessage(JSON.parse(e.data)); } catch {} };
+}
+
+function setConnected(ok) {
+  document.getElementById('status-dot').classList.toggle('connected', ok);
+  if (!ok) document.getElementById('machine-info').textContent = 'Reconnecting…';
+}
+
+// ── Message Handler ──────────────────────────────────────────────
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'session_info':    onSessionInfo(msg);    break;
+    case 'status_update':   onStatusUpdate(msg);   break;
+    case 'approval_request': onApprovalRequest(msg); break;
+    case 'task_started':
+      addActivity('🚀', `<span class="entry-badge badge-tool">TASK</span>Started: ${esc(msg.taskName)}`, msg.timestamp);
+      break;
+    case 'task_completed':
+      addActivity('✅', `<span class="entry-badge badge-approve">DONE</span>${esc(msg.taskName)}`, msg.timestamp);
+      break;
+    case 'tool_used':
+      addActivity('🔧', `<span class="entry-badge badge-tool">${esc(msg.toolName)}</span><span class="tool">${esc(summarize(msg.toolInput))}</span>`, msg.timestamp);
+      break;
+  }
+}
+
+function onSessionInfo(msg) {
+  const parts = [msg.machineName || 'Kiro'];
+  if (msg.workspaceName) parts.push(msg.workspaceName);
+  document.getElementById('machine-info').textContent = parts.join(' · ');
+}
+
+function onStatusUpdate(msg) {
+  const badge = document.getElementById('agent-badge');
+  const taskEl = document.getElementById('current-task');
+  badge.className = msg.agentState === 'running' ? 'running' : msg.agentState === 'waiting_approval' ? 'waiting' : '';
+  badge.textContent = msg.agentState === 'running' ? '● RUNNING' : msg.agentState === 'waiting_approval' ? '⚠ WAITING' : '◎ IDLE';
+  taskEl.textContent = msg.currentTask || '';
+  if (msg.workspaceName) {
+    const parts = [(document.getElementById('machine-info').textContent.split(' · ')[0])];
+    parts.push(msg.workspaceName);
+    document.getElementById('machine-info').textContent = parts.join(' · ');
+  }
+}
+
+// ── Chat ─────────────────────────────────────────────────────────
+function addChatMessage(text, fromPhone, ts) {
+  const msgs = document.getElementById('chat-messages');
+  const empty = document.getElementById('chat-empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = `chat-msg ${fromPhone ? 'from-phone' : 'from-kiro'}`;
+  div.innerHTML = `<div class="chat-bubble">${esc(text)}</div><div class="chat-meta">${fmtTime(ts || Date.now())}</div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── Activity ─────────────────────────────────────────────────────
+function addActivity(icon, html, ts) {
+  const feed = document.getElementById('activity-feed');
+  const empty = document.getElementById('empty-activity');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'entry';
+  div.innerHTML = `<div class="entry-icon">${icon}</div><div class="entry-body"><div class="entry-text">${html}</div><div class="entry-time">${fmtTime(ts || Date.now())}</div></div>`;
+  feed.insertBefore(div, feed.firstChild);
+  const all = feed.querySelectorAll('.entry');
+  if (all.length > MAX_ACTIVITY) all[all.length - 1].remove();
+}
+
+// ── Approval ─────────────────────────────────────────────────────
+function onApprovalRequest(msg) {
+  currentApprovalId = msg.id;
+  document.getElementById('approval-tool-name').textContent = msg.toolName;
+  document.getElementById('approval-cmd').textContent = msg.command;
+  const ctx = document.getElementById('approval-ctx');
+  if (msg.context) { ctx.textContent = msg.context; ctx.hidden = false; } else { ctx.hidden = true; }
+  startCountdown(msg.timeoutSeconds);
+  document.getElementById('approval-modal').classList.add('visible');
+  addActivity('⚠️', `<span class="entry-badge badge-tool">${esc(msg.toolName)}</span>Approval needed`, msg.timestamp);
+  // Show notification if backgrounded
+  if (document.visibilityState !== 'visible' && Notification?.permission === 'granted') {
+    new Notification('⚠️ Kiro needs approval', { body: `${msg.toolName}: ${msg.command.substring(0, 80)}`, icon: '/icon-192.png', requireInteraction: true });
+  } else if (Notification?.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+function startCountdown(seconds) {
+  clearApprovalTimer();
+  const bar = document.getElementById('timer-bar');
+  const label = document.getElementById('timer-label');
+  const end = Date.now() + seconds * 1000;
+  bar.style.transition = 'none'; bar.style.width = '100%';
+  bar.offsetWidth; // reflow
+  bar.style.transition = `width ${seconds}s linear`; bar.style.width = '0%';
+  approvalTimerInterval = setInterval(() => {
+    const rem = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    label.textContent = `${rem}s remaining`;
+    if (rem <= 0) { clearApprovalTimer(); dismissApproval(); addActivity('⏱️', 'Approval timed out — auto-denied', Date.now()); }
+  }, 500);
+}
+
+function clearApprovalTimer() { if (approvalTimerInterval) { clearInterval(approvalTimerInterval); approvalTimerInterval = null; } }
+function dismissApproval() { document.getElementById('approval-modal').classList.remove('visible'); currentApprovalId = null; clearApprovalTimer(); }
+
+function sendApproval(approved) {
+  if (!currentApprovalId) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'approval_response', id: crypto.randomUUID(), requestId: currentApprovalId, approved, timestamp: Date.now() }));
+  }
+  const icon = approved ? '✅' : '❌';
+  addActivity(icon, `<span class="entry-badge ${approved ? 'badge-approve' : 'badge-deny'}">${approved ? 'APPROVED' : 'DENIED'}</span>You responded`, Date.now());
+  dismissApproval();
+}
+
+document.getElementById('btn-approve').addEventListener('click', () => sendApproval(true));
+document.getElementById('btn-deny').addEventListener('click', () => sendApproval(false));
+
+// ── Tabs ─────────────────────────────────────────────────────────
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const panel = tab.dataset.panel;
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === panel));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${panel}`));
+      activePanel = panel;
+    });
+  });
+}
+
+// ── Input ────────────────────────────────────────────────────────
+function setupInput() {
+  const input = document.getElementById('msg-input');
+  const btn = document.getElementById('send-btn');
+  const feedback = document.getElementById('send-feedback');
+  let fbTimer = null;
+
+  function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showFeedback('⚠️ Not connected', 'var(--red)'); return;
+    }
+    ws.send(JSON.stringify({ type: 'send_instruction', id: crypto.randomUUID(), message: text, timestamp: Date.now() }));
+    addChatMessage(text, true, Date.now());
+    // Switch to chat tab to show the sent message
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === 'chat'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-chat'));
+    input.value = '';
+    showFeedback('Sent ✓', 'var(--green)');
+    addActivity('💬', `<span class="entry-badge badge-tool">YOU</span>${esc(text.substring(0, 60))}${text.length > 60 ? '…' : ''}`, Date.now());
+  }
+
+  function showFeedback(msg, color) {
+    feedback.textContent = msg; feedback.style.color = color;
+    if (fbTimer) clearTimeout(fbTimer);
+    fbTimer = setTimeout(() => { feedback.textContent = ''; }, 2500);
+  }
+
+  btn.addEventListener('click', send);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function summarize(obj) { const s = JSON.stringify(obj||{}); return s.length > 80 ? s.slice(0,80)+'…' : s; }
+function fmtTime(ts) { const d = new Date(ts); return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`; }
+</script>
+</body>
+</html>

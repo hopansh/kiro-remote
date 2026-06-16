@@ -1,0 +1,73 @@
+{
+  "name": "kiro-remote-control",
+  "displayName": "Kiro Remote Control",
+  "description": "Control your Kiro IDE from your Android phone",
+  "version": "0.1.0",
+  "publisher": "kiro-remote-control",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:kiroRemote.start",
+    "onCommand:kiroRemote.stop",
+    "onCommand:kiroRemote.showQR",
+    "onCommand:kiroRemote.installHooks"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kiroRemote.start",
+        "title": "Start Remote Session",
+        "category": "Kiro Remote"
+      },
+      {
+        "command": "kiroRemote.stop",
+        "title": "Stop Remote Session",
+        "category": "Kiro Remote"
+      },
+      {
+        "command": "kiroRemote.showQR",
+        "title": "Show QR Code",
+        "category": "Kiro Remote"
+      },
+      {
+        "command": "kiroRemote.installHooks",
+        "title": "Install Hooks into Workspace",
+        "category": "Kiro Remote"
+      }
+    ],
+    "configuration": {
+      "title": "Kiro Remote Control",
+      "properties": {
+        "kiroRemote.relayPort": {
+          "type": "number",
+          "default": 3737,
+          "description": "Port for the local relay server"
+        },
+        "kiroRemote.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start relay server when Kiro opens"
+        },
+        "kiroRemote.approvalTimeoutSeconds": {
+          "type": "number",
+          "default": 60,
+          "description": "Seconds to wait for phone approval before auto-denying"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {}
+}
