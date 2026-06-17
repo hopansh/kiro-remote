@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-extension:
+    name: Build Extension
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install extension dependencies
+        run: npm install
+        working-directory: extension
+
+      - name: Compile extension
+        run: npm run compile
+        working-directory: extension
+
+  build-relay-server:
+    name: Build Relay Server
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: relay-server/package-lock.json
+
+      - name: Install relay-server dependencies
+        run: npm install
+        working-directory: relay-server
+
+      - name: Build relay server
+        run: npm run build
+        working-directory: relay-server

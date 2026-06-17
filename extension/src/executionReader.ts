@@ -29,14 +29,20 @@ const EXEC_SUBDIR = '414d1636299d2b9e4ce7e17fb11f63e9';
 // Cache: executionId -> response text
 const cache = new Map<string, string>();
 let indexed = false;
+let lastScanTime = 0;
 
 function log(msg: string) {
   console.log(`[kiro-remote:exec ${new Date().toISOString().substring(11, 23)}] ${msg}`);
 }
 
-/** Scan all execution log directories and build the executionId→response cache. */
+/** Scan all execution log directories and build/update the executionId→response cache. */
 export function buildExecutionCache() {
-  if (indexed) return;
+  const now = Date.now();
+  // On first call: full scan. On subsequent calls: only scan files newer than last scan.
+  // This ensures new responses appear within ~2s of Kiro writing them.
+  const isFirstScan = !indexed;
+  const cutoff = isFirstScan ? 0 : lastScanTime - 5000; // 5s overlap to avoid race conditions
+  lastScanTime = now;
   indexed = true;
 
   let dirs: string[];
@@ -54,7 +60,11 @@ export function buildExecutionCache() {
 
     for (const file of files) {
       const fpath = path.join(execDir, file);
-      if (!fs.statSync(fpath).isFile()) continue;
+      let stat: fs.Stats;
+      try { stat = fs.statSync(fpath); } catch { continue; }
+      if (!stat.isFile()) continue;
+      // Skip files not modified since last scan (incremental update).
+      if (!isFirstScan && stat.mtimeMs < cutoff) continue;
       try {
         const data = JSON.parse(fs.readFileSync(fpath, 'utf8'));
         const execId: string = data.executionId;

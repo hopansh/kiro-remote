@@ -42,6 +42,11 @@ export class SessionManager {
     return this.session.token === token;
   }
 
+  isExpired(): boolean {
+    if (!this.session) return true;
+    return Date.now() > this.session.expiresAt;
+  }
+
   private generateToken(): string {
     // 6-character alphanumeric, easy to type if needed
     return Math.random().toString(36).substring(2, 8).toUpperCase();

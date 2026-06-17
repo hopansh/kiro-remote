@@ -13,6 +13,10 @@ export type MessageType =
   | 'approval_response'
   | 'send_instruction'
   | 'send_to_session'
+  | 'request_session_history' // phone → extension: fetch a specific session's history
+
+  // Relay → Extension
+  | 'request_refresh'     // relay → extension: phone connected, resend state
 
   // Internal
   | 'ping'
@@ -93,6 +97,7 @@ export interface KiroSession {
   title: string;
   workspacePath: string;
   workspaceName: string;
+  workspaceKey: string;
   dateCreated: number;
   messageCount: number;
   lastMessage?: string;
@@ -118,6 +123,16 @@ export interface ChatMessageMessage extends BaseMessage {
   sessionTitle: string;
 }
 
+export interface RequestRefreshMessage extends BaseMessage {
+  type: 'request_refresh';
+}
+
+export interface RequestSessionHistoryMessage extends BaseMessage {
+  type: 'request_session_history';
+  sessionId: string;
+  workspaceKey: string;
+}
+
 export type KiroMessage =
   | StatusUpdateMessage
   | ApprovalRequestMessage
@@ -131,4 +146,6 @@ export type KiroMessage =
   | ErrorMessage
   | SessionListMessage
   | SendToSessionMessage
-  | ChatMessageMessage;
+  | ChatMessageMessage
+  | RequestRefreshMessage
+  | RequestSessionHistoryMessage;

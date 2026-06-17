@@ -24,11 +24,6 @@ export class StatusBarController implements vscode.Disposable {
     this.item.backgroundColor = undefined;
   }
 
-  setWaitingApproval() {
-    this.item.text = '$(bell) Approval needed';
-    this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-  }
-
   dispose() {
     this.item.dispose();
   }

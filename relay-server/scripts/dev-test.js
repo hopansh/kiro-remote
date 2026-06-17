@@ -276,7 +276,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'status_update', id: 'demo-running', timestamp: Date.now(),
-        agentState: 'running', currentTask: 'Updating Field Tracking Dashboard',
+        agentState: 'running', currentTask: 'Refactoring authentication module',
       }));
       console.log('⚡ Sent demo status: RUNNING');
     }

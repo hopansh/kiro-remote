@@ -7,12 +7,17 @@
   "icon": "icon.png",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
+  "keywords": ["kiro", "remote", "mobile", "android", "pwa"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hopansh/kiro-remote-control.git"
+  },
+  "homepage": "https://github.com/hopansh/kiro-remote-control#readme",
+  "bugs": {
+    "url": "https://github.com/hopansh/kiro-remote-control/issues"
+  },
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:kiroRemote.start",
-    "onCommand:kiroRemote.stop",
-    "onCommand:kiroRemote.showQR",
-    "onCommand:kiroRemote.installHooks"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {

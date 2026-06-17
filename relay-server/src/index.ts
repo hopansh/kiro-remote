@@ -94,6 +94,8 @@ async function main() {
     const fullTunnelUrl = `${tunnelUrl}/?token=${session.token}`;
     console.log(`\n🌐 Cloudflare Tunnel active:`);
     console.log(`   ${fullTunnelUrl}\n`);
+    // Store the tunnel URL in the server so /health exposes it to the extension
+    (server as any).setTunnelUrl?.(fullTunnelUrl);
     printQRToTerminal(fullTunnelUrl).catch(() => {});
     saveQRToPNG(fullTunnelUrl, path.join(qrDir, 'qr-tunnel.png')).catch(() => {});
   }).catch((err) => {

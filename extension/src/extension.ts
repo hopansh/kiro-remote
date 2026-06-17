@@ -4,6 +4,7 @@ import { ApprovalWatcher } from './approvalWatcher';
 import { StatusPoller } from './statusPoller';
 import { ChatWatcher } from './chatWatcher';
 import { KiroSessionManager } from './sessionManager';
+import { ExecutionWatcher } from './executionWatcher';
 import { StatusBarController } from './statusBar';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,6 +15,7 @@ import { randomUUID } from 'crypto';
 let relayClient: RelayClient | null = null;
 let approvalWatcher: ApprovalWatcher | null = null;
 let statusPoller: StatusPoller | null = null;
+let executionWatcher: ExecutionWatcher | null = null;
 let chatWatchers: ChatWatcher[] = [];
 let kiroSessionManager: KiroSessionManager | null = null;
 let statusBar: StatusBarController | null = null;
@@ -214,6 +216,11 @@ async function startSession(context: vscode.ExtensionContext) {
   statusPoller = new StatusPoller(relayClient);
   statusPoller.start();
 
+  // Watch active execution file for real-time say actions (streaming responses)
+  // and supervised-mode diff approvals
+  executionWatcher = new ExecutionWatcher(relayClient);
+  executionWatcher.start();
+
   // Start session manager — sends full session list to phone on connect + every 10s
   kiroSessionManager = new KiroSessionManager(relayClient);
   kiroSessionManager.start();
@@ -307,6 +314,8 @@ async function stopSession() {
   log('Stopping session…');
   statusPoller?.stop();
   statusPoller = null;
+  executionWatcher?.stop();
+  executionWatcher = null;
   kiroSessionManager?.stop();
   kiroSessionManager = null;
   approvalWatcher?.stop();
@@ -336,15 +345,26 @@ async function stopSession() {
 }
 
 async function showQR(context: vscode.ExtensionContext) {
-  const qrPath = path.join(
-    process.env['HOME'] ?? process.env['USERPROFILE'] ?? '~',
-    '.kiro-remote',
-    'qr.png'
-  );
+  const localQrPath = path.join(os.homedir(), '.kiro-remote', 'qr.png');
+  const tunnelQrPath = path.join(os.homedir(), '.kiro-remote', 'qr-tunnel.png');
 
-  if (!fs.existsSync(qrPath)) {
+  if (!fs.existsSync(localQrPath)) {
     vscode.window.showWarningMessage('No active session. Start one first.');
     return;
+  }
+
+  // Poll the relay for the current tunnel URL (it may arrive after the QR opens)
+  let tunnelUrl: string | null = null;
+  if (currentToken) {
+    try {
+      const config = vscode.workspace.getConfiguration('kiroRemote');
+      const port = config.get<number>('relayPort', 3737);
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      if (res.ok) {
+        const data = await res.json() as { tunnelUrl?: string | null };
+        tunnelUrl = data.tunnelUrl ?? null;
+      }
+    } catch { /* relay not running */ }
   }
 
   const panel = vscode.window.createWebviewPanel(
@@ -352,25 +372,57 @@ async function showQR(context: vscode.ExtensionContext) {
     'Kiro Remote — Scan to Connect',
     vscode.ViewColumn.Beside,
     {
-      enableScripts: false,
-      localResourceRoots: [vscode.Uri.file(path.dirname(qrPath))],
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.file(path.join(os.homedir(), '.kiro-remote'))],
     }
   );
 
-  const qrUri = panel.webview.asWebviewUri(vscode.Uri.file(qrPath));
+  const localQrUri = panel.webview.asWebviewUri(vscode.Uri.file(localQrPath));
+  const tunnelQrUri = fs.existsSync(tunnelQrPath)
+    ? panel.webview.asWebviewUri(vscode.Uri.file(tunnelQrPath))
+    : null;
+
+  const localUrl = `http://${getLocalIP()}:${vscode.workspace.getConfiguration('kiroRemote').get<number>('relayPort', 3737)}/?token=${currentToken ?? ''}`;
+
   panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kiro Remote</title>
+  <style>
+    body { background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin:0; padding:24px; display:flex; flex-direction:column; align-items:center; min-height:100vh; box-sizing:border-box; }
+    h2 { margin-bottom:8px; font-size:18px; }
+    p { color:#8b949e; font-size:13px; margin-bottom:20px; text-align:center; }
+    .qr-section { background:#161b22; border:1px solid #30363d; border-radius:14px; padding:20px; margin:10px 0; width:100%; max-width:340px; display:flex; flex-direction:column; align-items:center; gap:12px; }
+    .qr-label { font-size:11px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:#8b949e; align-self:flex-start; }
+    .qr-label.local { color:#3fb950; }
+    .qr-label.tunnel { color:#58a6ff; }
+    img { width:260px; height:260px; border-radius:8px; }
+    .url { font-family:monospace; font-size:11px; color:#8b949e; word-break:break-all; text-align:center; background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:6px 10px; width:100%; }
+    .spinner { color:#8b949e; font-size:13px; padding:20px; }
+  </style>
 </head>
-<body style="background:#1a1a2e;display:flex;flex-direction:column;
-             align-items:center;justify-content:center;height:100vh;
-             font-family:monospace;color:#e0e0e0;margin:0;padding:20px;box-sizing:border-box;">
-  <h2 style="margin-bottom:24px;text-align:center;">📱 Scan to connect your phone</h2>
-  <img src="${qrUri}" alt="QR Code" style="width:300px;height:300px;border-radius:12px;" />
-  <p style="margin-top:16px;opacity:0.6;text-align:center;">Opens in Android Chrome • Works as a PWA</p>
+<body>
+  <h2>📱 Scan to connect your phone</h2>
+  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere.</p>
+
+  <div class="qr-section">
+    <div class="qr-label local">📶 Local WiFi</div>
+    <img src="${localQrUri}" alt="Local QR Code" />
+    <div class="url">${localUrl}</div>
+  </div>
+
+  ${tunnelQrUri ? `
+  <div class="qr-section">
+    <div class="qr-label tunnel">🌐 Cloudflare Tunnel (any network)</div>
+    <img src="${tunnelQrUri}" alt="Tunnel QR Code" />
+    <div class="url">${tunnelUrl ?? 'Tunnel URL active — see QR'}</div>
+  </div>` : `
+  <div class="qr-section">
+    <div class="qr-label tunnel">🌐 Cloudflare Tunnel</div>
+    <div class="spinner">⏳ Starting tunnel… (run <code>brew install cloudflared</code> if this takes too long)</div>
+  </div>`}
 </body>
 </html>`;
 }

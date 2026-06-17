@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { RelayClient } from './relayClient';
 import { KiroSession } from './types';
-import { decodeWorkspaceKey } from './chatWatcher';
+import { decodeWorkspaceKey, extractTextStatic } from './chatWatcher';
 import { randomUUID } from 'crypto';
 
 const KIRO_SESSIONS_BASE = path.join(
@@ -49,7 +49,7 @@ export class KiroSessionManager {
       id: randomUUID(),
       timestamp: Date.now(),
       sessions,
-    } as any);
+    });
   }
 
   private readAllSessions(): KiroSession[] {
@@ -77,18 +77,25 @@ export class KiroSessionManager {
         const sessionFile = path.join(KIRO_SESSIONS_BASE, dir, `${s.sessionId}.json`);
         let messageCount = 0;
         let lastMessage: string | undefined;
+        let lastInteractionTs: number = s.dateCreated ? parseInt(s.dateCreated, 10) : 0;
 
         if (fs.existsSync(sessionFile)) {
           try {
             const data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
             const history: unknown[] = data.history ?? [];
             messageCount = history.length;
-            // Get the last non-empty assistant message as preview
+            // Use the file's mtime as the most reliable "last interacted" signal —
+            // Kiro rewrites the session file every time a message is added.
+            try {
+              const mtime = fs.statSync(sessionFile).mtimeMs;
+              if (mtime > lastInteractionTs) lastInteractionTs = mtime;
+            } catch { /* ignore */ }
+            // Get the last non-empty message as preview
             for (let i = history.length - 1; i >= 0; i--) {
               const entry = history[i] as Record<string, unknown>;
               const msg = entry['message'] as Record<string, unknown> | undefined;
               if (!msg) continue;
-              const text = extractText(msg['content']);
+              const text = extractTextStatic(msg['content']);
               if (text.trim()) {
                 lastMessage = text.substring(0, 100);
                 break;
@@ -103,7 +110,7 @@ export class KiroSessionManager {
           workspacePath,
           workspaceName,
           workspaceKey: dir,
-          dateCreated: s.dateCreated ? parseInt(s.dateCreated, 10) : 0,
+          dateCreated: lastInteractionTs,
           messageCount,
           lastMessage,
         });
@@ -114,18 +121,4 @@ export class KiroSessionManager {
     results.sort((a, b) => b.dateCreated - a.dateCreated);
     return results;
   }
-}
-
-function extractText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((c: unknown) => {
-        const item = c as Record<string, unknown>;
-        return item['type'] === 'text' ? String(item['text'] ?? '') : '';
-      })
-      .join(' ')
-      .trim();
-  }
-  return '';
 }

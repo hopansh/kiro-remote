@@ -204,9 +204,9 @@ export class ChatWatcher {
         if (role === 'assistant') {
           const execId = e['executionId'] as string | undefined;
           const realResponse = execId ? getExecutionResponse(execId) : undefined;
-          text = realResponse ?? this.extractText(msg['content']);
+          text = realResponse ?? extractTextStatic(msg['content']);
         } else {
-          text = this.extractText(msg['content']);
+          text = extractTextStatic(msg['content']);
         }
         if (!text.trim()) continue;
 
@@ -224,21 +224,6 @@ export class ChatWatcher {
         this.relay.sendChatMessage(chatMsg);
       }
     } catch (e) { log(`loadSessionFile error for ${filePath}: ${e}`); }
-  }
-
-  private extractText(content: unknown): string {
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-      return content
-        .map((c: unknown) => {
-          const item = c as Record<string, unknown>;
-          if (item['type'] === 'text') return item['text'] as string ?? '';
-          return '';
-        })
-        .join('\n')
-        .trim();
-    }
-    return String(content ?? '');
   }
 
   /** Returns base64 workspace key for all open workspaces */
@@ -266,7 +251,7 @@ function log(msg: string) {
   console.log(`[kiro-remote:chat ${ts}] ${msg}`);
 }
 
-function extractTextStatic(content: unknown): string {
+export function extractTextStatic(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content

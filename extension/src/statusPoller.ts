@@ -26,15 +26,6 @@ export class StatusPoller {
     }
   }
 
-  // Called externally when approval state changes
-  setWaitingApproval(toolName: string) {
-    this.broadcast('waiting_approval', `Waiting approval: ${toolName}`);
-  }
-
-  setApprovalResolved() {
-    void this.poll(); // re-poll immediately to get actual state
-  }
-
   private async poll() {
     const { state, currentTask } = await this.detectAgentState();
     const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name;

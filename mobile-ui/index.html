@@ -46,44 +46,50 @@
     .panel { position:absolute; inset:0; display:none; flex-direction:column; overflow:hidden; }
     .panel.active { display:flex; }
 
-    /* ACTIVITY PANEL */
-    #panel-activity { overflow-y:auto; -webkit-overflow-scrolling:touch; }
-    #panel-activity > * { flex-shrink:0; }
-    .entry { display:flex; gap:10px; padding:8px 14px; border-bottom:1px solid rgba(48,54,61,.4); animation:fadeIn .2s ease; }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(-3px)} to{opacity:1;transform:none} }
-    .entry-icon { font-size:14px; width:20px; text-align:center; flex-shrink:0; margin-top:1px; }
-    .entry-body { flex:1; min-width:0; }
-    .entry-text { font-size:13px; color:var(--text); word-break:break-word; line-height:1.4; }
-    .entry-text.tool { font-family:var(--mono); font-size:11px; color:var(--text2); }
-    .entry-time { font-size:10px; color:var(--text2); opacity:.5; margin-top:2px; font-family:var(--mono); }
-    .entry-badge { display:inline-block; font-size:10px; font-family:var(--mono); padding:1px 5px; border-radius:3px; margin-right:4px; }
-    .badge-tool { background:rgba(88,166,255,.15); color:var(--accent); }
-    .badge-approve { background:rgba(63,185,80,.15); color:var(--green); }
-    .badge-deny { background:rgba(248,81,73,.15); color:var(--red); }
-    #empty-activity { padding:40px 20px; text-align:center; color:var(--text2); opacity:.5; font-size:13px; }
+    /* ACTIVITY PANEL — removed */
 
     /* CHAT PANEL */
-    #chat-messages { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 14px; display:flex; flex-direction:column; gap:10px; }
+    #chat-messages { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 14px 4px; display:flex; flex-direction:column; gap:8px; }
     #chat-messages::-webkit-scrollbar { width:3px; } #chat-messages::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
     .chat-msg { max-width:88%; }
     .chat-msg.from-phone { align-self:flex-end; }
     .chat-msg.from-kiro { align-self:flex-start; }
-    .chat-bubble { padding:9px 13px; border-radius:14px; font-size:13px; line-height:1.5; word-break:break-word; }
+    .chat-bubble { padding:9px 13px; border-radius:14px; font-size:13px; line-height:1.6; word-break:break-word; }
     .from-phone .chat-bubble { background:var(--accent); color:#0d1117; border-bottom-right-radius:4px; }
     .from-kiro .chat-bubble { background:var(--bg3); color:var(--text); border:1px solid var(--border); border-bottom-left-radius:4px; }
-    .chat-meta { font-size:10px; color:var(--text2); margin-top:3px; font-family:var(--mono); }
+    /* Markdown in assistant bubbles */
+    .from-kiro .chat-bubble p { margin:0 0 8px; } .from-kiro .chat-bubble p:last-child { margin-bottom:0; }
+    .from-kiro .chat-bubble code { background:rgba(0,0,0,.4); padding:1px 5px; border-radius:4px; font-family:var(--mono); font-size:11px; color:#e6edf3; }
+    .from-kiro .chat-bubble pre { background:rgba(0,0,0,.4); border:1px solid var(--border); border-radius:8px; padding:10px; overflow-x:auto; margin:6px 0; }
+    .from-kiro .chat-bubble pre code { background:none; padding:0; font-size:11px; }
+    .from-kiro .chat-bubble ul, .from-kiro .chat-bubble ol { padding-left:18px; margin:4px 0; }
+    .from-kiro .chat-bubble li { margin:2px 0; }
+    .from-kiro .chat-bubble strong { color:#e6edf3; font-weight:700; }
+    .from-kiro .chat-bubble h1,.from-kiro .chat-bubble h2,.from-kiro .chat-bubble h3 { font-size:14px; font-weight:700; margin:8px 0 4px; color:#e6edf3; }
+    .from-kiro .chat-bubble a { color:var(--accent); text-decoration:none; }
+    .from-kiro .chat-bubble blockquote { border-left:3px solid var(--border); margin:4px 0; padding-left:10px; color:var(--text2); }
+    .chat-meta { font-size:10px; color:var(--text2); margin-top:3px; font-family:var(--mono); opacity:.7; }
     .from-phone .chat-meta { text-align:right; }
     #chat-empty { padding:40px 20px; text-align:center; color:var(--text2); opacity:.5; font-size:13px; }
-    #chat-hint { padding:8px 14px; font-size:11px; color:var(--text2); text-align:center; border-bottom:1px solid var(--border); background:var(--bg3); flex-shrink:0; }
+    #chat-hint { padding:7px 14px; font-size:11px; color:var(--text2); text-align:center; border-bottom:1px solid var(--border); background:var(--bg3); flex-shrink:0; }
+    /* Typing indicator */
+    .typing-bubble { display:flex; gap:4px; align-items:center; padding:10px 14px; }
+    .typing-dot { width:7px; height:7px; border-radius:50%; background:var(--text2); animation:blink 1.2s ease-in-out infinite; }
+    .typing-dot:nth-child(2) { animation-delay:.2s; }
+    .typing-dot:nth-child(3) { animation-delay:.4s; }
+    @keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+    /* Scroll-to-bottom button */
+    #scroll-btn { display:none; position:absolute; bottom:56px; right:14px; width:36px; height:36px; border-radius:50%; background:var(--bg2); border:1px solid var(--border); color:var(--text2); font-size:18px; cursor:pointer; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.4); transition:opacity .2s; z-index:10; -webkit-tap-highlight-color:transparent; }
+    #scroll-btn.visible { display:flex; }
 
     /* INPUT BAR */
-    #input-bar { flex-shrink:0; display:flex; gap:8px; padding:9px 14px; padding-bottom:max(9px,env(safe-area-inset-bottom,9px)); background:var(--bg2); border-top:1px solid var(--border); }
-    #msg-input { flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:22px; color:var(--text); font-size:14px; padding:9px 16px; outline:none; -webkit-appearance:none; transition:border-color .2s; }
+    #input-bar { flex-shrink:0; display:flex; align-items:flex-end; gap:8px; padding:9px 14px; padding-bottom:max(9px,env(safe-area-inset-bottom,9px)); background:var(--bg2); border-top:1px solid var(--border); }
+    #msg-input { flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:14px; color:var(--text); font-size:14px; font-family:var(--sans); padding:9px 14px; outline:none; -webkit-appearance:none; transition:border-color .2s; resize:none; line-height:1.5; max-height:140px; overflow-y:auto; }
     #msg-input:focus { border-color:var(--accent); }
     #msg-input::placeholder { color:var(--text2); opacity:.5; }
-    #send-btn { width:38px; height:38px; border:none; border-radius:50%; background:var(--accent); color:#0d1117; font-size:18px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s,transform .1s; -webkit-tap-highlight-color:transparent; }
+    #send-btn { width:36px; height:36px; min-width:36px; border:none; border-radius:50%; background:var(--accent); color:#0d1117; font-size:16px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s,transform .1s; -webkit-tap-highlight-color:transparent; margin-bottom:1px; }
     #send-btn:active { opacity:.8; transform:scale(.95); }
-    #send-feedback { font-size:11px; color:var(--green); padding:0 14px 5px; height:16px; flex-shrink:0; }
+    #send-feedback { font-size:11px; color:var(--green); padding:0 14px 5px; flex-shrink:0; }
 
     /* APPROVAL MODAL */
     #approval-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:100; flex-direction:column; align-items:stretch; justify-content:flex-end; backdrop-filter:blur(4px); }
@@ -147,7 +153,6 @@
       <div id="status-dot"></div>
       <div><div id="app-name">Kiro Remote</div><div id="machine-info">Connecting…</div></div>
     </div>
-    <div style="font-size:18px;opacity:.5">⌨️</div>
   </div>
 
   <div id="state-bar">
@@ -158,15 +163,15 @@
   <div id="tabs">
     <div class="tab active" data-panel="chat">💬 Chat</div>
     <div class="tab" data-panel="sessions">🗂 Sessions</div>
-    <div class="tab" data-panel="activity">📋 Activity</div>
   </div>
 
   <div id="panels">
     <!-- Chat panel -->
     <div class="panel active" id="panel-chat">
       <div id="chat-back" class=""><span>←</span><span id="chat-back-label">Back to Sessions</span></div>
-      <div id="chat-hint">Type below to send a message to Kiro ↓</div>
+      <div id="chat-hint">Select a session from 🗂 Sessions or type to message the active Kiro session</div>
       <div id="chat-messages"><div id="chat-empty">Select a session from the 🗂 Sessions tab to view and continue that chat.</div></div>
+      <button id="scroll-btn" aria-label="Scroll to bottom">↓</button>
     </div>
 
     <!-- Sessions panel -->
@@ -184,10 +189,6 @@
       </div>
     </div>
 
-    <!-- Activity panel -->
-    <div class="panel" id="panel-activity">
-      <div id="activity-feed"><div id="empty-activity">No activity yet.<br/>Start an agent task in Kiro to see events here.</div></div>
-    </div>
   </div>
 
   <div id="send-feedback"></div>
@@ -196,7 +197,7 @@
     <pre id="debug-log" style="font-size:10px;color:var(--green);font-family:var(--mono);white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
   </div>
   <div id="input-bar">
-    <input id="msg-input" type="text" placeholder="Message Kiro…" autocomplete="off" autocorrect="off" spellcheck="false" />
+    <textarea id="msg-input" rows="1" placeholder="Message Kiro…" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
     <button id="send-btn" aria-label="Send">➤</button>
   </div>
 </div>
@@ -223,17 +224,16 @@
 
 const params = new URLSearchParams(location.search);
 const token = params.get('token');
-const MAX_ACTIVITY = 100;
 let ws = null, wsRetryTimer = null;
 let currentApprovalId = null, approvalTimerInterval = null;
-let activePanel = 'chat';
+let pingInterval = null;
 let wsAttempts = 0;
 
 // uid() is only available in HTTPS/secure contexts.
 // Since this page loads over HTTP on local network, we need a fallback.
 function uid() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return uid();
+    return crypto.randomUUID();
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0;
@@ -261,10 +261,58 @@ if (!token) {
   setupInput();
   setupSessionSearch();
   setupChatBack();
+  setupScrollBtn();
 }
 
 function registerSW() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// ── Minimal Markdown renderer ────────────────────────────────────
+function renderMarkdown(text) {
+  // Escape HTML first, then apply markdown transformations
+  let html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
+    `<pre><code>${code.trim()}</code></pre>`);
+
+  // Inline code (`...`)
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Bold (**...**)
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // Italic (*...*)
+  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+  // Headers (### ## #)
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Unordered lists
+  html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+
+  // Numbered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0">');
+
+  // Line breaks → paragraphs (blank lines between text)
+  html = html.replace(/\n\n+/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+  if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<pre')) {
+    html = `<p>${html}</p>`;
+  }
+
+  return html;
 }
 
 function setupDebugToggle() {
@@ -315,10 +363,18 @@ async function connectWS() {
     dbg('WS OPEN ✓');
     setConnected(true);
     if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
+    // Start keepalive ping every 30s to prevent connection drops
+    if (pingInterval) clearInterval(pingInterval);
+    pingInterval = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping', id: uid(), timestamp: Date.now() }));
+      }
+    }, 30000);
   };
   ws.onclose = (ev) => {
     dbg(`WS CLOSED code=${ev.code} reason="${ev.reason || '(none)'}" clean=${ev.wasClean}`);
     setConnected(false);
+    if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
     wsRetryTimer = setTimeout(connectWS, 3000);
   };
   ws.onerror = () => { dbg('WS ERROR (see close code next)'); };
@@ -344,20 +400,11 @@ function setConnected(ok) {
 // ── Message Handler ──────────────────────────────────────────────
 function handleMessage(msg) {
   switch (msg.type) {
-    case 'session_info':    onSessionInfo(msg);    break;
-    case 'status_update':   onStatusUpdate(msg);   break;
+    case 'session_info':     onSessionInfo(msg);     break;
+    case 'status_update':    onStatusUpdate(msg);    break;
     case 'approval_request': onApprovalRequest(msg); break;
-    case 'session_list':    onSessionList(msg);    break;
-    case 'chat_message':    onChatMessage(msg);    break;
-    case 'task_started':
-      addActivity('🚀', `<span class="entry-badge badge-tool">TASK</span>Started: ${esc(msg.taskName)}`, msg.timestamp);
-      break;
-    case 'task_completed':
-      addActivity('✅', `<span class="entry-badge badge-approve">DONE</span>${esc(msg.taskName)}`, msg.timestamp);
-      break;
-    case 'tool_used':
-      addActivity('🔧', `<span class="entry-badge badge-tool">${esc(msg.toolName)}</span><span class="tool">${esc(summarize(msg.toolInput))}</span>`, msg.timestamp);
-      break;
+    case 'session_list':     onSessionList(msg);     break;
+    case 'chat_message':     onChatMessage(msg);     break;
   }
 }
 
@@ -370,6 +417,7 @@ function onSessionInfo(msg) {
 function onStatusUpdate(msg) {
   const badge = document.getElementById('agent-badge');
   const taskEl = document.getElementById('current-task');
+  const wasIdle = badge.className === '' || badge.className === 'idle';
   badge.className = msg.agentState === 'running' ? 'running' : msg.agentState === 'waiting_approval' ? 'waiting' : '';
   badge.textContent = msg.agentState === 'running' ? '● RUNNING' : msg.agentState === 'waiting_approval' ? '⚠ WAITING' : '◎ IDLE';
   taskEl.textContent = msg.currentTask || '';
@@ -378,11 +426,16 @@ function onStatusUpdate(msg) {
     parts.push(msg.workspaceName);
     document.getElementById('machine-info').textContent = parts.join(' · ');
   }
+  // Show typing indicator in chat when Kiro starts running after we sent a message
+  if (msg.agentState === 'running' && activeSession) {
+    showTypingIndicator();
+  } else if (msg.agentState === 'idle') {
+    removeTypingIndicator();
+  }
 }
 
 // ── Chat ─────────────────────────────────────────────────────────
 const messagesBySession = {};   // sessionId -> [{ text, fromPhone, ts }]
-const sessionTitles = {};       // sessionId -> title
 
 function onChatMessage(msg) {
   const fromPhone = (msg.role === 'user');
@@ -392,22 +445,18 @@ function onChatMessage(msg) {
   const msgId = msg.id || (msg.role + '|' + msg.text + '|' + msg.timestamp);
   if (messagesBySession[sid].some(m => m.id === msgId)) return;
   messagesBySession[sid].push({ id: msgId, text: msg.text, fromPhone, ts: msg.timestamp });
-  if (msg.sessionTitle) sessionTitles[sid] = msg.sessionTitle;
 
   // If this message belongs to the currently-open session, render it live
   if (activeSession && activeSession.sessionId === sid) {
     appendBubble(msg.text, fromPhone, msg.timestamp);
   }
-
-  // Activity feed
-  const icon = fromPhone ? '💬' : '🤖';
-  const label = fromPhone ? 'You' : (msg.sessionTitle || 'Kiro');
-  addActivity(icon, `<span class="entry-badge badge-tool">${esc(label)}</span>${esc(msg.text.substring(0, 80))}${msg.text.length > 80 ? '…' : ''}`, msg.timestamp);
 }
 
 /** Render ALL messages for the active session (called when opening a session). */
 function renderActiveSessionMessages() {
   const msgs = document.getElementById('chat-messages');
+  const loading = document.getElementById('chat-loading');
+  if (loading) loading.remove();
   msgs.innerHTML = '';
   if (!activeSession) {
     msgs.innerHTML = '<div id="chat-empty">Select a session from the 🗂 Sessions tab to view and continue that chat.</div>';
@@ -429,12 +478,17 @@ function appendBubble(text, fromPhone, ts, noScroll) {
   const msgs = document.getElementById('chat-messages');
   const empty = document.getElementById('chat-empty');
   if (empty) empty.remove();
+  // Remove typing indicator if showing a real response
+  if (!fromPhone) removeTypingIndicator();
   const div = document.createElement('div');
   div.className = `chat-msg ${fromPhone ? 'from-phone' : 'from-kiro'}`;
-  div.innerHTML = `<div class="chat-bubble">${esc(text)}</div><div class="chat-meta">${fmtTime(ts || Date.now())}</div>`;
+  const content = fromPhone ? esc(text) : renderMarkdown(text);
+  div.innerHTML = `<div class="chat-bubble">${content}</div><div class="chat-meta">${fmtTime(ts || Date.now())}</div>`;
   msgs.appendChild(div);
-  if (!noScroll && msgs.scrollHeight - msgs.scrollTop < msgs.clientHeight + 200) {
-    msgs.scrollTop = msgs.scrollHeight;
+  if (!noScroll) {
+    const atBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60;
+    if (atBottom) msgs.scrollTop = msgs.scrollHeight;
+    else updateScrollBtn();
   }
 }
 
@@ -449,29 +503,55 @@ function addChatMessage(text, fromPhone, ts, sessionId) {
   }
 }
 
-// ── Activity ─────────────────────────────────────────────────────
-function addActivity(icon, html, ts) {
-  const feed = document.getElementById('activity-feed');
-  const empty = document.getElementById('empty-activity');
-  if (empty) empty.remove();
+// ── Typing indicator ─────────────────────────────────────────────
+function showTypingIndicator() {
+  if (document.getElementById('typing-indicator')) return;
+  const msgs = document.getElementById('chat-messages');
   const div = document.createElement('div');
-  div.className = 'entry';
-  div.innerHTML = `<div class="entry-icon">${icon}</div><div class="entry-body"><div class="entry-text">${html}</div><div class="entry-time">${fmtTime(ts || Date.now())}</div></div>`;
-  feed.insertBefore(div, feed.firstChild);
-  const all = feed.querySelectorAll('.entry');
-  if (all.length > MAX_ACTIVITY) all[all.length - 1].remove();
+  div.id = 'typing-indicator';
+  div.className = 'chat-msg from-kiro';
+  div.innerHTML = '<div class="chat-bubble typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  document.getElementById('typing-indicator')?.remove();
+}
+
+// ── Scroll-to-bottom button ──────────────────────────────────────
+function setupScrollBtn() {
+  const msgs = document.getElementById('chat-messages');
+  const btn = document.getElementById('scroll-btn');
+  msgs.addEventListener('scroll', updateScrollBtn);
+  btn.addEventListener('click', () => {
+    msgs.scrollTop = msgs.scrollHeight;
+    btn.classList.remove('visible');
+  });
+}
+
+function updateScrollBtn() {
+  const msgs = document.getElementById('chat-messages');
+  const btn = document.getElementById('scroll-btn');
+  const atBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+  btn.classList.toggle('visible', !atBottom && msgs.scrollHeight > msgs.clientHeight + 100);
 }
 
 // ── Approval ─────────────────────────────────────────────────────
 function onApprovalRequest(msg) {
   currentApprovalId = msg.id;
-  document.getElementById('approval-tool-name').textContent = msg.toolName;
+  // Special display for supervised-mode file changes
+  const isFileDiff = msg.toolName === 'file_changes';
+  document.getElementById('approval-tool-name').textContent =
+    isFileDiff ? '📝 File Changes' : msg.toolName;
   document.getElementById('approval-cmd').textContent = msg.command;
   const ctx = document.getElementById('approval-ctx');
   if (msg.context) { ctx.textContent = msg.context; ctx.hidden = false; } else { ctx.hidden = true; }
+  // Update button labels for diff review
+  document.getElementById('btn-approve').textContent = isFileDiff ? '✅ Accept Changes' : '✅ Approve';
+  document.getElementById('btn-deny').textContent = isFileDiff ? '❌ Reject Changes' : '❌ Deny';
   startCountdown(msg.timeoutSeconds);
   document.getElementById('approval-modal').classList.add('visible');
-  addActivity('⚠️', `<span class="entry-badge badge-tool">${esc(msg.toolName)}</span>Approval needed`, msg.timestamp);
   // Show notification if backgrounded
   if (document.visibilityState !== 'visible' && Notification?.permission === 'granted') {
     new Notification('⚠️ Kiro needs approval', { body: `${msg.toolName}: ${msg.command.substring(0, 80)}`, icon: '/icon-192.png', requireInteraction: true });
@@ -491,7 +571,7 @@ function startCountdown(seconds) {
   approvalTimerInterval = setInterval(() => {
     const rem = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     label.textContent = `${rem}s remaining`;
-    if (rem <= 0) { clearApprovalTimer(); dismissApproval(); addActivity('⏱️', 'Approval timed out — auto-denied', Date.now()); }
+    if (rem <= 0) { clearApprovalTimer(); dismissApproval(); dbg('Approval timed out — auto-denied'); }
   }, 500);
 }
 
@@ -502,9 +582,10 @@ function sendApproval(approved) {
   if (!currentApprovalId) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'approval_response', id: uid(), requestId: currentApprovalId, approved, timestamp: Date.now() }));
+    dbg(`Sent approval_response: ${approved ? 'APPROVED' : 'DENIED'} for ${currentApprovalId}`);
+  } else {
+    dbg(`Cannot send approval — WS not open (state=${ws?.readyState})`);
   }
-  const icon = approved ? '✅' : '❌';
-  addActivity(icon, `<span class="entry-badge ${approved ? 'badge-approve' : 'badge-deny'}">${approved ? 'APPROVED' : 'DENIED'}</span>You responded`, Date.now());
   dismissApproval();
 }
 
@@ -518,7 +599,6 @@ function setupTabs() {
       const panel = tab.dataset.panel;
       document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === panel));
       document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${panel}`));
-      activePanel = panel;
     });
   });
 }
@@ -529,6 +609,13 @@ function setupInput() {
   const btn = document.getElementById('send-btn');
   const feedback = document.getElementById('send-feedback');
   let fbTimer = null;
+
+  // Auto-grow the textarea as the user types
+  function autoGrow() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+  }
+  input.addEventListener('input', autoGrow);
 
   function send() {
     const text = input.value.trim();
@@ -548,12 +635,14 @@ function setupInput() {
     } else {
       ws.send(JSON.stringify({ type: 'send_instruction', id: uid(), message: text, timestamp: Date.now() }));
     }
-    addChatMessage(text, true, Date.now(), activeSession?.sessionId, activeSession?.title);
+    addChatMessage(text, true, Date.now(), activeSession?.sessionId);
+    // Show typing indicator immediately while waiting for Kiro to respond
+    if (activeSession) showTypingIndicator();
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === 'chat'));
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-chat'));
     input.value = '';
+    input.style.height = 'auto';
     showFeedback('Sent ✓', 'var(--green)');
-    addActivity('💬', `<span class="entry-badge badge-tool">YOU</span>${esc(text.substring(0, 60))}${text.length > 60 ? '…' : ''}`, Date.now());
   }
 
   function showFeedback(msg, color) {
@@ -563,7 +652,13 @@ function setupInput() {
   }
 
   btn.addEventListener('click', send);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  // Enter sends; Shift+Enter inserts a newline
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
 }
 
 // ── Sessions ─────────────────────────────────────────────────────
@@ -650,6 +745,11 @@ function openSession(session) {
   // Clear this session's cached messages so the on-demand history (read in
   // correct order from disk) becomes the authoritative copy.
   messagesBySession[session.sessionId] = [];
+
+  // Show loading indicator immediately while history is fetched from disk
+  const msgs = document.getElementById('chat-messages');
+  msgs.innerHTML = '<div id="chat-loading" style="padding:40px 20px;text-align:center;color:var(--text2);font-size:13px;">Loading messages…</div>';
+
   renderActiveSessionMessages();
 
   // Request the full history for this specific session from the extension
@@ -697,7 +797,6 @@ function fmtDate(ts) {
 
 // ── Helpers ──────────────────────────────────────────────────────
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function summarize(obj) { const s = JSON.stringify(obj||{}); return s.length > 80 ? s.slice(0,80)+'…' : s; }
 function fmtTime(ts) { const d = new Date(ts); return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`; }
 </script>
 </body>

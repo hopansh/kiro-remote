@@ -282,14 +282,14 @@ export class RelayClient {
   /** Broadcast a Kiro chat message to connected phone(s) */
   sendChatMessage(msg: ChatMessage) {
     const payload: KiroMessage = {
-      type: 'chat_message' as any,
+      type: 'chat_message',
       id: msg.id ?? randomUUID(),
       timestamp: msg.timestamp ?? Date.now(),
       role: msg.role,
       text: msg.text,
       sessionId: msg.sessionId,
       sessionTitle: msg.sessionTitle,
-    } as any;
+    };
     this.send(payload);
   }
 
@@ -312,16 +312,16 @@ export class RelayClient {
       }
 
       if (msg.type === 'send_to_session') {
-        const req = msg as any;
+        const req = msg as import('./types').SendToSessionMessage;
         void this.submitToSession(req.sessionId, req.workspacePath, req.message);
       }
 
-      if ((msg as any).type === 'request_refresh') {
+      if (msg.type === 'request_refresh') {
         this.onRefreshRequest?.();
       }
 
-      if ((msg as any).type === 'request_session_history') {
-        const req = msg as any;
+      if (msg.type === 'request_session_history') {
+        const req = msg as import('./types').RequestSessionHistoryMessage;
         this.onRequestSessionHistory?.(req.sessionId, req.workspaceKey);
       }
     } catch (e) {

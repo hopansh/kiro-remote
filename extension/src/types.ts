@@ -12,6 +12,8 @@ export type MessageType =
   | 'chat_message'
   | 'session_list'        // extension → phone: full list of all sessions
   | 'send_to_session'     // phone → extension: open session + send message
+  | 'request_refresh'     // relay → extension: phone connected, resend state
+  | 'request_session_history' // phone → extension: fetch a specific session's history
   | 'ping'
   | 'pong'
   | 'error';
@@ -108,6 +110,24 @@ export interface SendToSessionMessage extends BaseMessage {
   message: string;
 }
 
+export interface ChatMessageMessage extends BaseMessage {
+  type: 'chat_message';
+  role: 'user' | 'assistant' | 'tool';
+  text: string;
+  sessionId: string;
+  sessionTitle: string;
+}
+
+export interface RequestRefreshMessage extends BaseMessage {
+  type: 'request_refresh';
+}
+
+export interface RequestSessionHistoryMessage extends BaseMessage {
+  type: 'request_session_history';
+  sessionId: string;
+  workspaceKey: string;
+}
+
 export type KiroMessage =
   | StatusUpdateMessage
   | ApprovalRequestMessage
@@ -120,4 +140,7 @@ export type KiroMessage =
   | PongMessage
   | ErrorMessage
   | SessionListMessage
-  | SendToSessionMessage;
+  | SendToSessionMessage
+  | ChatMessageMessage
+  | RequestRefreshMessage
+  | RequestSessionHistoryMessage;
