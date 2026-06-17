@@ -41,14 +41,14 @@
     .tab { flex:1; padding:9px 0; text-align:center; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:color .2s,border-color .2s; -webkit-tap-highlight-color:transparent; }
     .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
-    /* PANELS */
+    /* PANELS — base: hidden; only .active shows as flex column */
     #panels { flex:1; overflow:hidden; position:relative; }
-    .panel { position:absolute; inset:0; overflow-y:auto; -webkit-overflow-scrolling:touch; display:none; }
-    .panel.active { display:block; }
-    .panel::-webkit-scrollbar { width:3px; } .panel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+    .panel { position:absolute; inset:0; display:none; flex-direction:column; overflow:hidden; }
+    .panel.active { display:flex; }
 
     /* ACTIVITY PANEL */
-    #panel-activity { padding:8px 0; }
+    #panel-activity { overflow-y:auto; -webkit-overflow-scrolling:touch; }
+    #panel-activity > * { flex-shrink:0; }
     .entry { display:flex; gap:10px; padding:8px 14px; border-bottom:1px solid rgba(48,54,61,.4); animation:fadeIn .2s ease; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(-3px)} to{opacity:1;transform:none} }
     .entry-icon { font-size:14px; width:20px; text-align:center; flex-shrink:0; margin-top:1px; }
@@ -63,8 +63,6 @@
     #empty-activity { padding:40px 20px; text-align:center; color:var(--text2); opacity:.5; font-size:13px; }
 
     /* CHAT PANEL */
-    #panel-chat { display:flex; flex-direction:column; }
-    #panel-chat.active { display:flex; }
     #chat-messages { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 14px; display:flex; flex-direction:column; gap:10px; }
     #chat-messages::-webkit-scrollbar { width:3px; } #chat-messages::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
     .chat-msg { max-width:88%; }
@@ -107,6 +105,24 @@
     #btn-approve { background:var(--green); color:#0d1117; }
     #btn-deny { background:var(--red); color:#fff; }
 
+    /* SESSIONS */
+    #sessions-list { overflow-y:auto; -webkit-overflow-scrolling:touch; flex:1; }
+    .workspace-group { padding:6px 14px 2px; }
+    .workspace-label { font-size:10px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--text2); padding:6px 0 4px; border-bottom:1px solid var(--border); }
+    .session-item { display:flex; align-items:flex-start; gap:10px; padding:10px 4px; border-bottom:1px solid rgba(48,54,61,.4); cursor:pointer; -webkit-tap-highlight-color:transparent; transition:background .1s; border-radius:6px; }
+    .session-item:active { background:var(--bg3); }
+    .session-icon { font-size:18px; flex-shrink:0; margin-top:1px; }
+    .session-body { flex:1; min-width:0; }
+    .session-title { font-size:13px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .session-preview { font-size:11px; color:var(--text2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:var(--mono); }
+    .session-meta { font-size:10px; color:var(--text2); opacity:.5; margin-top:3px; font-family:var(--mono); }
+    .session-count { font-size:10px; color:var(--accent); background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.2); border-radius:10px; padding:1px 6px; flex-shrink:0; margin-top:2px; font-family:var(--mono); }
+    #sessions-search:focus { border-color:var(--accent); }
+
+    /* CHAT BACK BUTTON */
+    #chat-back { display:none; align-items:center; gap:8px; padding:8px 14px; background:var(--bg3); border-bottom:1px solid var(--border); font-size:13px; color:var(--accent); cursor:pointer; flex-shrink:0; -webkit-tap-highlight-color:transparent; }
+    #chat-back.visible { display:flex; }
+
     /* NO TOKEN */
     #no-token { display:none; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:32px; text-align:center; gap:12px; }
     #no-token.visible { display:flex; }
@@ -117,6 +133,13 @@
 <body>
 
 <div id="no-token"><div style="font-size:48px">📱</div><h2>Kiro Remote</h2><p>No session token.<br/>Scan the QR code from Kiro IDE<br/>or open the URL with <code>?token=XXXXXX</code></p></div>
+
+<div id="expired-banner" style="display:none;position:fixed;inset:0;z-index:200;background:var(--bg);flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;gap:14px;">
+  <div style="font-size:48px">🔑</div>
+  <h2 style="font-size:20px;color:var(--text)">Session Expired</h2>
+  <p style="font-size:14px;color:var(--text2);line-height:1.6">This token is no longer valid.<br/>Re-scan the QR code from Kiro to reconnect.</p>
+  <button onclick="location.reload()" style="margin-top:8px;background:var(--accent);color:#0d1117;border:none;border-radius:10px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer;">Retry</button>
+</div>
 
 <div id="app">
   <div id="header">
@@ -134,14 +157,31 @@
 
   <div id="tabs">
     <div class="tab active" data-panel="chat">💬 Chat</div>
+    <div class="tab" data-panel="sessions">🗂 Sessions</div>
     <div class="tab" data-panel="activity">📋 Activity</div>
   </div>
 
   <div id="panels">
     <!-- Chat panel -->
     <div class="panel active" id="panel-chat">
+      <div id="chat-back" class=""><span>←</span><span id="chat-back-label">Back to Sessions</span></div>
       <div id="chat-hint">Type below to send a message to Kiro ↓</div>
-      <div id="chat-messages"><div id="chat-empty">No messages yet.<br/>Start chatting with Kiro from your phone.</div></div>
+      <div id="chat-messages"><div id="chat-empty">Select a session from the 🗂 Sessions tab to view and continue that chat.</div></div>
+    </div>
+
+    <!-- Sessions panel -->
+    <div class="panel" id="panel-sessions">
+      <div id="sessions-search-bar" style="padding:10px 14px 6px;flex-shrink:0;">
+        <input id="sessions-search" type="search" placeholder="Search sessions…"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+                 color:var(--text);font-size:13px;padding:8px 12px;outline:none;-webkit-appearance:none;"
+          autocomplete="off" spellcheck="false" />
+      </div>
+      <div id="sessions-list" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;padding:0 0 8px;">
+        <div id="sessions-empty" style="padding:40px 20px;text-align:center;color:var(--text2);opacity:.5;font-size:13px;">
+          Loading sessions…
+        </div>
+      </div>
     </div>
 
     <!-- Activity panel -->
@@ -151,6 +191,10 @@
   </div>
 
   <div id="send-feedback"></div>
+  <div id="debug-panel" style="display:none;background:#000;border-top:1px solid var(--border);padding:8px 12px;max-height:160px;overflow-y:auto;">
+    <div style="font-size:10px;color:var(--text2);margin-bottom:4px;font-family:var(--mono);">DEBUG — tap status dot 3× to hide</div>
+    <pre id="debug-log" style="font-size:10px;color:var(--green);font-family:var(--mono);white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
+  </div>
   <div id="input-bar">
     <input id="msg-input" type="text" placeholder="Message Kiro…" autocomplete="off" autocorrect="off" spellcheck="false" />
     <button id="send-btn" aria-label="Send">➤</button>
@@ -183,29 +227,113 @@ const MAX_ACTIVITY = 100;
 let ws = null, wsRetryTimer = null;
 let currentApprovalId = null, approvalTimerInterval = null;
 let activePanel = 'chat';
+let wsAttempts = 0;
+
+// uid() is only available in HTTPS/secure contexts.
+// Since this page loads over HTTP on local network, we need a fallback.
+function uid() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return uid();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// ── On-screen debug (tap the status dot 3x to toggle) ────────────
+function dbg(msg) {
+  const el = document.getElementById('debug-log');
+  if (!el) return;
+  const ts = new Date().toTimeString().substring(0, 8);
+  el.textContent = `[${ts}] ${msg}\n` + el.textContent;
+  if (el.textContent.length > 4000) el.textContent = el.textContent.substring(0, 4000);
+}
 
 if (!token) {
   document.getElementById('no-token').classList.add('visible');
   document.getElementById('app').style.display = 'none';
 } else {
   registerSW();
+  setupDebugToggle();
   connectWS();
   setupTabs();
   setupInput();
+  setupSessionSearch();
+  setupChatBack();
 }
 
 function registerSW() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+function setupDebugToggle() {
+  let taps = 0, lastTap = 0;
+  document.getElementById('status-dot').addEventListener('click', () => {
+    const now = Date.now();
+    taps = (now - lastTap < 600) ? taps + 1 : 1;
+    lastTap = now;
+    if (taps >= 3) {
+      const panel = document.getElementById('debug-panel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      taps = 0;
+    }
+  });
+}
+
 // ── WebSocket ────────────────────────────────────────────────────
-function connectWS() {
+async function connectWS() {
+  // Validate the token over HTTP first so we can show a clear message
+  // if it's stale (e.g. an old QR / cached PWA after the token changed).
+  try {
+    const res = await fetch(`${location.origin}/session/${token}`);
+    if (res.status === 401) {
+      dbg('Token rejected (401) — session expired');
+      showExpired();
+      return;
+    }
+  } catch (err) {
+    dbg(`Token check failed (server unreachable): ${err}`);
+    // Server unreachable — retry shortly (e.g. relay still starting, or wrong network)
+    document.getElementById('machine-info').textContent = 'Server unreachable…';
+    wsRetryTimer = setTimeout(connectWS, 3000);
+    return;
+  }
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/mobile?token=${token}`);
-  ws.onopen = () => { setConnected(true); if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; } };
-  ws.onclose = () => { setConnected(false); wsRetryTimer = setTimeout(connectWS, 3000); };
-  ws.onerror = () => {};
-  ws.onmessage = (e) => { try { handleMessage(JSON.parse(e.data)); } catch {} };
+  const url = `${proto}://${location.host}/mobile?token=${token}`;
+  wsAttempts++;
+  dbg(`Connecting (#${wsAttempts}) → ${url}`);
+  try {
+    ws = new WebSocket(url);
+  } catch (err) {
+    dbg(`WS constructor threw: ${err}`);
+    wsRetryTimer = setTimeout(connectWS, 3000);
+    return;
+  }
+  ws.onopen = () => {
+    dbg('WS OPEN ✓');
+    setConnected(true);
+    if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
+  };
+  ws.onclose = (ev) => {
+    dbg(`WS CLOSED code=${ev.code} reason="${ev.reason || '(none)'}" clean=${ev.wasClean}`);
+    setConnected(false);
+    wsRetryTimer = setTimeout(connectWS, 3000);
+  };
+  ws.onerror = () => { dbg('WS ERROR (see close code next)'); };
+  ws.onmessage = (e) => {
+    try { handleMessage(JSON.parse(e.data)); }
+    catch (err) { dbg(`Bad message: ${err}`); }
+  };
+}
+
+function showExpired() {
+  if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
+  document.getElementById('status-dot').classList.remove('connected');
+  document.getElementById('machine-info').textContent = 'Session expired';
+  const banner = document.getElementById('expired-banner');
+  if (banner) banner.style.display = 'flex';
 }
 
 function setConnected(ok) {
@@ -219,6 +347,8 @@ function handleMessage(msg) {
     case 'session_info':    onSessionInfo(msg);    break;
     case 'status_update':   onStatusUpdate(msg);   break;
     case 'approval_request': onApprovalRequest(msg); break;
+    case 'session_list':    onSessionList(msg);    break;
+    case 'chat_message':    onChatMessage(msg);    break;
     case 'task_started':
       addActivity('🚀', `<span class="entry-badge badge-tool">TASK</span>Started: ${esc(msg.taskName)}`, msg.timestamp);
       break;
@@ -251,7 +381,51 @@ function onStatusUpdate(msg) {
 }
 
 // ── Chat ─────────────────────────────────────────────────────────
-function addChatMessage(text, fromPhone, ts) {
+const messagesBySession = {};   // sessionId -> [{ text, fromPhone, ts }]
+const sessionTitles = {};       // sessionId -> title
+
+function onChatMessage(msg) {
+  const fromPhone = (msg.role === 'user');
+  const sid = msg.sessionId || '__active__';
+  if (!messagesBySession[sid]) messagesBySession[sid] = [];
+  // Dedupe by message id — every Kiro message has a unique UUID.
+  const msgId = msg.id || (msg.role + '|' + msg.text + '|' + msg.timestamp);
+  if (messagesBySession[sid].some(m => m.id === msgId)) return;
+  messagesBySession[sid].push({ id: msgId, text: msg.text, fromPhone, ts: msg.timestamp });
+  if (msg.sessionTitle) sessionTitles[sid] = msg.sessionTitle;
+
+  // If this message belongs to the currently-open session, render it live
+  if (activeSession && activeSession.sessionId === sid) {
+    appendBubble(msg.text, fromPhone, msg.timestamp);
+  }
+
+  // Activity feed
+  const icon = fromPhone ? '💬' : '🤖';
+  const label = fromPhone ? 'You' : (msg.sessionTitle || 'Kiro');
+  addActivity(icon, `<span class="entry-badge badge-tool">${esc(label)}</span>${esc(msg.text.substring(0, 80))}${msg.text.length > 80 ? '…' : ''}`, msg.timestamp);
+}
+
+/** Render ALL messages for the active session (called when opening a session). */
+function renderActiveSessionMessages() {
+  const msgs = document.getElementById('chat-messages');
+  msgs.innerHTML = '';
+  if (!activeSession) {
+    msgs.innerHTML = '<div id="chat-empty">Select a session from the 🗂 Sessions tab to view and continue that chat.</div>';
+    return;
+  }
+  const list = messagesBySession[activeSession.sessionId] || [];
+  if (list.length === 0) {
+    msgs.innerHTML = '<div id="chat-empty">No messages in this session yet.<br/>Type below to send one.</div>';
+    return;
+  }
+  // Sort by timestamp so order is correct
+  list.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  for (const m of list) appendBubble(m.text, m.fromPhone, m.ts, true);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+/** Append a single chat bubble to the chat-messages container. */
+function appendBubble(text, fromPhone, ts, noScroll) {
   const msgs = document.getElementById('chat-messages');
   const empty = document.getElementById('chat-empty');
   if (empty) empty.remove();
@@ -259,7 +433,20 @@ function addChatMessage(text, fromPhone, ts) {
   div.className = `chat-msg ${fromPhone ? 'from-phone' : 'from-kiro'}`;
   div.innerHTML = `<div class="chat-bubble">${esc(text)}</div><div class="chat-meta">${fmtTime(ts || Date.now())}</div>`;
   msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
+  if (!noScroll && msgs.scrollHeight - msgs.scrollTop < msgs.clientHeight + 200) {
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+/** Locally record + render a message the user just sent. */
+function addChatMessage(text, fromPhone, ts, sessionId) {
+  const sid = sessionId || (activeSession && activeSession.sessionId) || '__active__';
+  if (!messagesBySession[sid]) messagesBySession[sid] = [];
+  const msgId = 'phone-' + ts;
+  messagesBySession[sid].push({ id: msgId, text, fromPhone, ts });
+  if (activeSession && activeSession.sessionId === sid) {
+    appendBubble(text, fromPhone, ts);
+  }
 }
 
 // ── Activity ─────────────────────────────────────────────────────
@@ -314,7 +501,7 @@ function dismissApproval() { document.getElementById('approval-modal').classList
 function sendApproval(approved) {
   if (!currentApprovalId) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'approval_response', id: crypto.randomUUID(), requestId: currentApprovalId, approved, timestamp: Date.now() }));
+    ws.send(JSON.stringify({ type: 'approval_response', id: uid(), requestId: currentApprovalId, approved, timestamp: Date.now() }));
   }
   const icon = approved ? '✅' : '❌';
   addActivity(icon, `<span class="entry-badge ${approved ? 'badge-approve' : 'badge-deny'}">${approved ? 'APPROVED' : 'DENIED'}</span>You responded`, Date.now());
@@ -349,9 +536,19 @@ function setupInput() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       showFeedback('⚠️ Not connected', 'var(--red)'); return;
     }
-    ws.send(JSON.stringify({ type: 'send_instruction', id: crypto.randomUUID(), message: text, timestamp: Date.now() }));
-    addChatMessage(text, true, Date.now());
-    // Switch to chat tab to show the sent message
+    if (activeSession) {
+      ws.send(JSON.stringify({
+        type: 'send_to_session',
+        id: uid(),
+        sessionId: activeSession.sessionId,
+        workspacePath: activeSession.workspacePath,
+        message: text,
+        timestamp: Date.now()
+      }));
+    } else {
+      ws.send(JSON.stringify({ type: 'send_instruction', id: uid(), message: text, timestamp: Date.now() }));
+    }
+    addChatMessage(text, true, Date.now(), activeSession?.sessionId, activeSession?.title);
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === 'chat'));
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-chat'));
     input.value = '';
@@ -367,6 +564,135 @@ function setupInput() {
 
   btn.addEventListener('click', send);
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+}
+
+// ── Sessions ─────────────────────────────────────────────────────
+let allSessions = [];
+let activeSession = null; // { sessionId, workspacePath, title }
+
+function onSessionList(msg) {
+  allSessions = msg.sessions || [];
+  renderSessions(document.getElementById('sessions-search').value);
+}
+
+function renderSessions(filter) {
+  const list = document.getElementById('sessions-list');
+  const empty = document.getElementById('sessions-empty');
+  const q = (filter || '').toLowerCase().trim();
+
+  const filtered = q
+    ? allSessions.filter(s =>
+        s.title.toLowerCase().includes(q) ||
+        s.workspaceName.toLowerCase().includes(q) ||
+        (s.lastMessage || '').toLowerCase().includes(q))
+    : allSessions;
+
+  if (filtered.length === 0) {
+    list.innerHTML = '';
+    list.appendChild(Object.assign(document.createElement('div'), {
+      id: 'sessions-empty',
+      style: 'padding:40px 20px;text-align:center;color:var(--text2);opacity:.5;font-size:13px;',
+      textContent: q ? 'No sessions match your search.' : 'No sessions yet.',
+    }));
+    return;
+  }
+
+  // Group by workspace
+  const groups = {};
+  for (const s of filtered) {
+    const key = s.workspacePath;
+    if (!groups[key]) groups[key] = { name: s.workspaceName, path: key, sessions: [] };
+    groups[key].sessions.push(s);
+  }
+
+  list.innerHTML = '';
+  for (const group of Object.values(groups)) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'workspace-group';
+    const label = document.createElement('div');
+    label.className = 'workspace-label';
+    label.textContent = group.name;
+    groupEl.appendChild(label);
+
+    for (const s of group.sessions) {
+      const item = document.createElement('div');
+      item.className = 'session-item';
+      item.innerHTML = `
+        <div class="session-icon">💬</div>
+        <div class="session-body">
+          <div class="session-title">${esc(s.title)}</div>
+          ${s.lastMessage ? `<div class="session-preview">${esc(s.lastMessage)}</div>` : ''}
+          <div class="session-meta">${fmtDate(s.dateCreated)} · ${s.messageCount} msg</div>
+        </div>
+        <div class="session-count">${s.messageCount}</div>`;
+      item.addEventListener('click', () => openSession(s));
+      groupEl.appendChild(item);
+    }
+    list.appendChild(groupEl);
+  }
+}
+
+function openSession(session) {
+  activeSession = session;
+
+  // Switch to chat tab
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === 'chat'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-chat'));
+
+  // Show back button
+  const back = document.getElementById('chat-back');
+  back.classList.add('visible');
+  document.getElementById('chat-back-label').textContent = `${session.workspaceName} / ${session.title}`;
+
+  // Update input placeholder
+  document.getElementById('msg-input').placeholder = `Message in "${session.title}"…`;
+
+  // Clear this session's cached messages so the on-demand history (read in
+  // correct order from disk) becomes the authoritative copy.
+  messagesBySession[session.sessionId] = [];
+  renderActiveSessionMessages();
+
+  // Request the full history for this specific session from the extension
+  // (the live stream only covers recent sessions; this fetches older ones).
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'request_session_history',
+      id: uid(),
+      sessionId: session.sessionId,
+      workspaceKey: session.workspaceKey,
+      timestamp: Date.now()
+    }));
+  }
+
+  addActivity('🗂', `<span class="entry-badge badge-tool">OPENED</span>${esc(session.title)} (${esc(session.workspaceName)})`, Date.now());
+}
+
+function setupSessionSearch() {
+  const input = document.getElementById('sessions-search');
+  input.addEventListener('input', () => renderSessions(input.value));
+}
+
+function setupChatBack() {
+  document.getElementById('chat-back').addEventListener('click', () => {
+    activeSession = null;
+    document.getElementById('chat-back').classList.remove('visible');
+    document.getElementById('msg-input').placeholder = 'Message Kiro…';
+    renderActiveSessionMessages();
+    // Switch to sessions tab
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === 'sessions'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-sessions'));
+  });
+}
+
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diffDays = Math.floor((now - d) / 86400000);
+  if (diffDays === 0) return 'Today ' + fmtTime(ts);
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+  return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear().toString().slice(2)}`;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────

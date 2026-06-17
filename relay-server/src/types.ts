@@ -1,15 +1,18 @@
 export type MessageType =
   // Extension → Relay → Phone
-  | 'status_update'       // agent is idle/running/waiting
-  | 'approval_request'    // Kiro wants to run a command, needs yes/no
-  | 'task_started'        // a spec task just began
-  | 'task_completed'      // a spec task just finished
-  | 'tool_used'           // post-tool-use notification
-  | 'session_info'        // sent to phone on connect (session metadata)
+  | 'status_update'
+  | 'approval_request'
+  | 'task_started'
+  | 'task_completed'
+  | 'tool_used'
+  | 'session_info'
+  | 'chat_message'
+  | 'session_list'
 
   // Phone → Relay → Extension
-  | 'approval_response'   // user approved or denied a command
-  | 'send_instruction'    // user typed a message to send to Kiro agent
+  | 'approval_response'
+  | 'send_instruction'
+  | 'send_to_session'
 
   // Internal
   | 'ping'
@@ -85,6 +88,36 @@ export interface ErrorMessage extends BaseMessage {
   message: string;
 }
 
+export interface KiroSession {
+  sessionId: string;
+  title: string;
+  workspacePath: string;
+  workspaceName: string;
+  dateCreated: number;
+  messageCount: number;
+  lastMessage?: string;
+}
+
+export interface SessionListMessage extends BaseMessage {
+  type: 'session_list';
+  sessions: KiroSession[];
+}
+
+export interface SendToSessionMessage extends BaseMessage {
+  type: 'send_to_session';
+  sessionId: string;
+  workspacePath: string;
+  message: string;
+}
+
+export interface ChatMessageMessage extends BaseMessage {
+  type: 'chat_message';
+  role: 'user' | 'assistant' | 'tool';
+  text: string;
+  sessionId: string;
+  sessionTitle: string;
+}
+
 export type KiroMessage =
   | StatusUpdateMessage
   | ApprovalRequestMessage
@@ -95,4 +128,7 @@ export type KiroMessage =
   | SessionInfoMessage
   | PingMessage
   | PongMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | SessionListMessage
+  | SendToSessionMessage
+  | ChatMessageMessage;

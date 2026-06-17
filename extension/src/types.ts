@@ -9,6 +9,9 @@ export type MessageType =
   | 'session_info'
   | 'approval_response'
   | 'send_instruction'
+  | 'chat_message'
+  | 'session_list'        // extension → phone: full list of all sessions
+  | 'send_to_session'     // phone → extension: open session + send message
   | 'ping'
   | 'pong'
   | 'error';
@@ -82,6 +85,29 @@ export interface ErrorMessage extends BaseMessage {
   message: string;
 }
 
+export interface KiroSession {
+  sessionId: string;
+  title: string;
+  workspacePath: string;
+  workspaceName: string;
+  workspaceKey: string;
+  dateCreated: number;
+  messageCount: number;
+  lastMessage?: string;
+}
+
+export interface SessionListMessage extends BaseMessage {
+  type: 'session_list';
+  sessions: KiroSession[];
+}
+
+export interface SendToSessionMessage extends BaseMessage {
+  type: 'send_to_session';
+  sessionId: string;
+  workspacePath: string;
+  message: string;
+}
+
 export type KiroMessage =
   | StatusUpdateMessage
   | ApprovalRequestMessage
@@ -92,4 +118,6 @@ export type KiroMessage =
   | SessionInfoMessage
   | PingMessage
   | PongMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | SessionListMessage
+  | SendToSessionMessage;

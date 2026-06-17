@@ -1,7 +1,9 @@
-const CACHE = 'kiro-remote-v1';
-const SHELL = ['/', '/manifest.json', '/icon-192.png'];
+const CACHE = 'kiro-remote-v2';
+const SHELL = ['/manifest.json', '/icon-192.png'];
 
 self.addEventListener('install', e => {
+  // Cache only static assets — NOT index.html, so the page is always fresh
+  // (a stale page would carry a dead session token).
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
   self.skipWaiting();
 });
@@ -18,7 +20,11 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   // Don't intercept WebSocket upgrades or hook calls
   if (e.request.url.includes('/mobile') || e.request.url.includes('/hook')) return;
-
+  // Always fetch the navigation/page fresh from network (never serve stale HTML).
+  if (e.request.mode === 'navigate') {
+    e.respondWith(fetch(e.request).catch(() => caches.match('/manifest.json')));
+    return;
+  }
   e.respondWith(
     fetch(e.request).catch(() => caches.match(e.request))
   );

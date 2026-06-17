@@ -1,8 +1,9 @@
 // Pure Node.js WebSocket client — no external dependencies
 import * as net from 'net';
-import * as http from 'http';
 import * as crypto from 'crypto';
 import { KiroMessage, ApprovalRequestMessage, ApprovalResponseMessage, SendInstructionMessage } from './types';
+import { ChatMessage } from './chatWatcher';
+import { randomUUID } from 'crypto';
 
 type ApprovalResolver = (approved: boolean) => void;
 
@@ -203,6 +204,10 @@ export class RelayClient {
   private pendingApprovals = new Map<string, ApprovalResolver>();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private shouldReconnect = true;
+  /** Called when the relay asks for a fresh session list (e.g. a phone connected). */
+  onRefreshRequest: (() => void) | null = null;
+  /** Called when the phone opens a specific session and wants its full history. */
+  onRequestSessionHistory: ((sessionId: string, workspacePath: string) => void) | null = null;
 
   constructor(private readonly url: string) {}
 
@@ -274,6 +279,20 @@ export class RelayClient {
     });
   }
 
+  /** Broadcast a Kiro chat message to connected phone(s) */
+  sendChatMessage(msg: ChatMessage) {
+    const payload: KiroMessage = {
+      type: 'chat_message' as any,
+      id: msg.id ?? randomUUID(),
+      timestamp: msg.timestamp ?? Date.now(),
+      role: msg.role,
+      text: msg.text,
+      sessionId: msg.sessionId,
+      sessionTitle: msg.sessionTitle,
+    } as any;
+    this.send(payload);
+  }
+
   private onMessage(raw: string) {
     try {
       const msg: KiroMessage = JSON.parse(raw);
@@ -291,29 +310,83 @@ export class RelayClient {
         const instruction = msg as SendInstructionMessage;
         void this.submitInstruction(instruction.message);
       }
+
+      if (msg.type === 'send_to_session') {
+        const req = msg as any;
+        void this.submitToSession(req.sessionId, req.workspacePath, req.message);
+      }
+
+      if ((msg as any).type === 'request_refresh') {
+        this.onRefreshRequest?.();
+      }
+
+      if ((msg as any).type === 'request_session_history') {
+        const req = msg as any;
+        this.onRequestSessionHistory?.(req.sessionId, req.workspaceKey);
+      }
     } catch (e) {
       console.error('[kiro-remote] Failed to parse message:', e);
     }
   }
 
-  private async submitInstruction(text: string) {
+  private async submitToSession(sessionId: string, workspacePath: string, text: string) {
+    console.log(`[kiro-remote] Sending to session ${sessionId}: ${text.substring(0, 50)}`);
     try {
       const { commands } = await import('vscode');
-      await commands.executeCommand('kiroAgent.chat.submit', { message: text });
-    } catch {
-      // Fallback: show notification with Copy button
+      // kiroAgent.loadSessionWithPrompt(chatSessionId, prompt) — opens the session and sends the message
+      await commands.executeCommand('kiroAgent.loadSessionWithPrompt', sessionId, text);
+      console.log(`[kiro-remote] Sent to session ${sessionId} via loadSessionWithPrompt`);
+      return;
+    } catch (e) {
+      console.log(`[kiro-remote] loadSessionWithPrompt failed: ${e}, trying focusContinueInput`);
+    }
+
+    // Fallback: just focus the chat and submit generically
+    await this.submitInstruction(text);
+  }
+
+  private async submitInstruction(text: string) {
+    console.log('[kiro-remote] Submitting instruction:', text.substring(0, 50));
+    // Discovered real commands from Kiro's extension.js:
+    // kiroAgent.agent.askAgent — submits to active chat session
+    // kiroAgent.executions.queueUserMessage — queues a message to active execution
+
+    const tryCommands: Array<[string, unknown]> = [
+      ['kiroAgent.agent.askAgent', text],
+      ['kiroAgent.executions.queueUserMessage', { message: text }],
+      ['kiroAgent.focusContinueInputWithoutClear', undefined],
+    ];
+
+    for (const [cmd, arg] of tryCommands) {
       try {
-        const { window, env } = await import('vscode');
-        const action = await window.showInformationMessage(
-          `📱 From phone: "${text}"`,
-          'Copy'
-        );
-        if (action === 'Copy') {
-          await env.clipboard.writeText(text);
+        const { commands } = await import('vscode');
+        if (arg !== undefined) {
+          await commands.executeCommand(cmd, arg);
+        } else {
+          await commands.executeCommand(cmd);
         }
+        console.log(`[kiro-remote] Instruction submitted via ${cmd}`);
+        return;
       } catch (e) {
-        console.error('[kiro-remote] Failed to show instruction notification:', e);
+        console.log(`[kiro-remote] ${cmd} failed: ${e}`);
       }
+    }
+
+    // Last resort: copy to clipboard and notify
+    try {
+      const { window, env } = await import('vscode');
+      await env.clipboard.writeText(text);
+      window.showInformationMessage(
+        `📱 Message from phone copied to clipboard. Paste into Kiro chat.`,
+        'Focus Chat'
+      ).then(async action => {
+        if (action === 'Focus Chat') {
+          const { commands } = await import('vscode');
+          try { await commands.executeCommand('kiroAgent.focusChatInput'); } catch { }
+        }
+      });
+    } catch (e) {
+      console.error('[kiro-remote] clipboard fallback failed:', e);
     }
   }
 }

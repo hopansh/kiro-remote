@@ -15,6 +15,7 @@ import {
   SendInstructionMessage,
 } from './types';
 import { randomUUID } from 'crypto';
+import { rlog } from './log';
 
 interface PendingApproval {
   resolve: (approved: boolean) => void;
@@ -47,6 +48,7 @@ export function createServer(sessionManager: SessionManager) {
     res.json({
       status: 'ok',
       sessionId: session?.id ?? null,
+      token: session?.token ?? null,
       connected: {
         extension: session?.extensionConnected ?? false,
         mobile: session?.mobileConnected ?? false,
@@ -81,7 +83,19 @@ export function createServer(sessionManager: SessionManager) {
   let extensionWs: WebSocket.WebSocket | null = null;
   const mobileClients = new Set<WebSocket.WebSocket>();
 
+  // Cache the most recent session list so we can replay it to a phone the
+  // instant it connects (avoids waiting for the next 10s refresh).
+  let lastSessionList: KiroMessage | null = null;
+  // Buffer recent chat messages so a newly-connected phone sees history.
+  const recentChatMessages: KiroMessage[] = [];
+
   function broadcastToMobile(message: KiroMessage) {
+    if (message.type === 'session_list') {
+      lastSessionList = message;
+    } else if (message.type === 'chat_message') {
+      recentChatMessages.push(message);
+      if (recentChatMessages.length > 200) recentChatMessages.shift();
+    }
     const payload = JSON.stringify(message);
     for (const client of mobileClients) {
       if (client.readyState === WebSocket.OPEN) {
@@ -99,6 +113,7 @@ export function createServer(sessionManager: SessionManager) {
   // Handle upgrade (route to extension or mobile WS handler)
   httpServer.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
+    rlog('ws', `Upgrade request: ${url.pathname} from ${request.socket.remoteAddress}`);
 
     if (url.pathname === '/extension') {
       wss.handleUpgrade(request, socket as any, head, (ws) => {
@@ -106,7 +121,12 @@ export function createServer(sessionManager: SessionManager) {
       });
     } else if (url.pathname === '/mobile') {
       const token = url.searchParams.get('token') ?? '';
-      if (!sessionManager.isValid(token)) {
+      const session = sessionManager.get();
+      const expected = session?.token ?? '(no session)';
+      const valid = sessionManager.isValid(token);
+      rlog('ws', `Mobile connect attempt. token="${token}" expected="${expected}" valid=${valid}`);
+      if (!valid) {
+        rlog('ws', `REJECTED mobile connection — token mismatch or expired`);
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
@@ -115,6 +135,7 @@ export function createServer(sessionManager: SessionManager) {
         wss.emit('connection', ws, request, 'mobile');
       });
     } else {
+      rlog('ws', `Unknown upgrade path: ${url.pathname} — destroying socket`);
       socket.destroy();
     }
   });
@@ -145,7 +166,7 @@ export function createServer(sessionManager: SessionManager) {
     } else if (role === 'mobile') {
       mobileClients.add(ws);
       if (session) session.mobileConnected = true;
-      console.log('📱 Mobile client connected');
+      rlog('ws', `📱 Mobile client connected (total: ${mobileClients.size})`);
 
       // Send session info on connect
       if (session) {
@@ -160,6 +181,20 @@ export function createServer(sessionManager: SessionManager) {
         ws.send(JSON.stringify(sessionInfo));
       }
 
+      // Replay cached session list immediately so the phone shows data at once.
+      if (lastSessionList) {
+        ws.send(JSON.stringify(lastSessionList));
+        rlog('ws', `Replayed cached session_list to new mobile`);
+      }
+      // Replay buffered chat history.
+      for (const m of recentChatMessages) {
+        ws.send(JSON.stringify(m));
+      }
+      // Ask the extension to refresh the session list now (in case it changed).
+      if (extensionWs?.readyState === WebSocket.OPEN) {
+        extensionWs.send(JSON.stringify({ type: 'request_refresh', id: randomUUID(), timestamp: Date.now() }));
+      }
+
       ws.on('message', (data: WebSocket.RawData) => {
         try {
           const msg: KiroMessage = JSON.parse(data.toString());
@@ -172,7 +207,7 @@ export function createServer(sessionManager: SessionManager) {
       ws.on('close', () => {
         mobileClients.delete(ws);
         if (session && mobileClients.size === 0) session.mobileConnected = false;
-        console.log('📱 Mobile client disconnected');
+        rlog('ws', `📱 Mobile client disconnected (remaining: ${mobileClients.size})`);
       });
     }
   });
@@ -223,14 +258,13 @@ export function createServer(sessionManager: SessionManager) {
         pendingApprovals.delete(response.requestId);
         pending.resolve(response.approved);
       }
-      // Forward to extension
       sendToExtension(response);
-    } else if (msg.type === 'send_instruction') {
+    } else if (msg.type === 'send_instruction' || msg.type === 'send_to_session'
+               || (msg as { type: string }).type === 'request_session_history') {
       // Forward to extension
       sendToExtension(msg);
     } else if (msg.type === 'ping') {
       const pong: KiroMessage = { type: 'pong', id: (msg as { id: string }).id, timestamp: Date.now() };
-      // respond to the mobile client that sent it
       broadcastToMobile(pong);
     }
   }

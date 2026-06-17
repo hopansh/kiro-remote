@@ -1,9 +1,10 @@
 {
   "name": "kiro-remote-control",
   "displayName": "Kiro Remote Control",
-  "description": "Control your Kiro IDE from your Android phone",
+  "description": "Control your Kiro IDE from your Android phone — view chat, approve tool calls, and send messages remotely.",
   "version": "0.1.0",
   "publisher": "kiro-remote-control",
+  "icon": "icon.png",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "activationEvents": [
@@ -35,6 +36,16 @@
         "command": "kiroRemote.installHooks",
         "title": "Install Hooks into Workspace",
         "category": "Kiro Remote"
+      },
+      {
+        "command": "kiroRemote.showLogs",
+        "title": "Show Logs",
+        "category": "Kiro Remote"
+      },
+      {
+        "command": "kiroRemote.resetToken",
+        "title": "Reset Session Token",
+        "category": "Kiro Remote"
       }
     ],
     "configuration": {
@@ -61,7 +72,9 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --no-dependencies"
+    "build": "npm run compile && node scripts/sync-bundle.js",
+    "package": "npm run build && vsce package --allow-missing-repository --skip-license --no-dependencies",
+    "package:only": "vsce package --allow-missing-repository --skip-license --no-dependencies"
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",

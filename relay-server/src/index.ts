@@ -43,18 +43,34 @@ function printBanner(localUrl: string, tunnelUrl: string | null, token: string) 
 }
 
 async function main() {
-  // 1. Create session
-  const sessionManager = new SessionManager(3600);
+  // 1. Create session — use the token provided by the extension if present,
+  //    so the QR code always matches the server the extension spawned.
+  const fixedToken = process.env.KIRO_REMOTE_TOKEN;
+  const sessionManager = new SessionManager(3600, fixedToken);
   const session = sessionManager.create();
+  console.log(`Session token: ${session.token}${fixedToken ? ' (from extension)' : ' (generated)'}`);
 
-  // 2. Start server
+  // 2. Start server with proper error handling
   const server = createServer(sessionManager);
-  server.listen(PORT, () => {
-    console.log(`\n🚀 Relay server running on port ${PORT}`);
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`FATAL: port ${PORT} is already in use. Another relay server is running.`);
+    } else {
+      console.error('FATAL server error:', err.message);
+    }
+    process.exit(1);
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(PORT, () => {
+      console.log(`\n🚀 Relay server running on port ${PORT}`);
+      resolve();
+    });
   });
 
   // 3. Detect local IP + build mobile URL
-  const localIP = getLocalIP();
+  const localIP = process.env.KIRO_REMOTE_LOCAL_IP || getLocalIP();
   const localUrl = `http://${localIP}:${PORT}/?token=${session.token}`;
 
   // 4. Print banner + QR
@@ -79,23 +95,22 @@ async function main() {
     console.log(`\n🌐 Cloudflare Tunnel active:`);
     console.log(`   ${fullTunnelUrl}\n`);
     printQRToTerminal(fullTunnelUrl).catch(() => {});
-    // Save tunnel QR
     saveQRToPNG(fullTunnelUrl, path.join(qrDir, 'qr-tunnel.png')).catch(() => {});
   }).catch((err) => {
     console.warn(`\n⚠️  Cloudflare Tunnel unavailable: ${err.message}`);
     console.warn('   For remote access, run: brew install cloudflared\n');
   });
 
-  // Graceful shutdown
-  process.on('SIGINT', () => {
+  // Graceful shutdown — force exit so the port is freed even with open WS connections.
+  const shutdown = () => {
     console.log('\n👋 Shutting down relay server...');
     tunnel.stop();
     server.close(() => process.exit(0));
-  });
-  process.on('SIGTERM', () => {
-    tunnel.stop();
-    server.close(() => process.exit(0));
-  });
+    // Force-exit if close() hangs on open WebSocket connections.
+    setTimeout(() => process.exit(0), 800);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch((err) => {

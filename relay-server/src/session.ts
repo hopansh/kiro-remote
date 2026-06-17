@@ -12,16 +12,18 @@ export interface Session {
 export class SessionManager {
   private session: Session | null = null;
   private readonly timeoutSeconds: number;
+  private readonly fixedToken: string | undefined;
 
-  constructor(timeoutSeconds = 3600) {
+  constructor(timeoutSeconds = 3600, fixedToken?: string) {
     this.timeoutSeconds = timeoutSeconds;
+    this.fixedToken = fixedToken && fixedToken.trim() ? fixedToken.trim() : undefined;
   }
 
   create(): Session {
     const now = Date.now();
     this.session = {
       id: randomUUID(),
-      token: this.generateToken(),
+      token: this.fixedToken ?? this.generateToken(),
       createdAt: now,
       expiresAt: now + this.timeoutSeconds * 1000,
       extensionConnected: false,

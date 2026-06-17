@@ -9,3 +9,7 @@ tsconfig.json
 !hooks/**
 !server/**
 !mobile-ui/**
+!icon.png
+!icon.svg
+!README.md
+!LICENSE

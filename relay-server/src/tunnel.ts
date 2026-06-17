@@ -5,63 +5,78 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const execFileAsync = promisify(execFile);
+const INSTALL_DIR = path.join(os.homedir(), '.kiro-remote');
+const BIN = path.join(INSTALL_DIR, 'cloudflared');
+
+/** Returns a path to a working cloudflared, downloading+extracting if needed. */
+async function ensureCloudflared(): Promise<string | null> {
+  // 1. Already on PATH (brew install cloudflared)
+  try {
+    await execFileAsync('cloudflared', ['--version']);
+    return 'cloudflared';
+  } catch { /* not on PATH */ }
+
+  // 2. Already downloaded and working
+  if (fs.existsSync(BIN)) {
+    try {
+      await execFileAsync(BIN, ['--version']);
+      return BIN;
+    } catch {
+      try { fs.unlinkSync(BIN); } catch { /* ignore */ }
+    }
+  }
+
+  // 3. Download the official .tgz and extract
+  try {
+    fs.mkdirSync(INSTALL_DIR, { recursive: true });
+    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
+    const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${arch}.tgz`;
+    const tgz = path.join(INSTALL_DIR, 'cloudflared.tgz');
+
+    console.log(`📥 Downloading cloudflared (${arch})...`);
+    await execFileAsync('curl', ['-fsSL', '-o', tgz, url], { maxBuffer: 1024 * 1024 * 64 });
+
+    // Extract — the tgz contains a single `cloudflared` binary
+    await execFileAsync('tar', ['-xzf', tgz, '-C', INSTALL_DIR]);
+    fs.chmodSync(BIN, 0o755);
+    try { fs.unlinkSync(tgz); } catch { /* ignore */ }
+
+    // Verify it runs
+    await execFileAsync(BIN, ['--version']);
+    console.log('✅ cloudflared installed');
+    return BIN;
+  } catch (e) {
+    console.warn(`Could not install cloudflared: ${(e as Error).message}`);
+    try { fs.unlinkSync(BIN); } catch { /* ignore */ }
+    return null;
+  }
+}
 
 export class TunnelManager {
   private tunnelProcess: ReturnType<typeof spawn> | null = null;
   private publicUrl: string | null = null;
 
-  async ensureCloudflaredInstalled(): Promise<void> {
-    // Check if cloudflared is on PATH
-    try {
-      await execFileAsync('cloudflared', ['--version']);
-      return; // already installed
-    } catch {
-      // not found, try ~/.kiro-remote/cloudflared
-      const localBin = path.join(os.homedir(), '.kiro-remote', 'cloudflared');
-      if (fs.existsSync(localBin)) {
-        process.env.PATH = `${path.dirname(localBin)}:${process.env.PATH}`;
-        // Verify it actually works
-        try {
-          await execFileAsync(localBin, ['--version']);
-          return;
-        } catch {
-          // Binary exists but may be corrupt/wrong arch — redownload
-          fs.unlinkSync(localBin);
-        }
-      }
-      // download it
-      await this.downloadCloudflared();
-    }
-  }
-
   async start(port: number): Promise<string> {
-    await this.ensureCloudflaredInstalled();
-
-    // Find the cloudflared binary path
-    const localBin = path.join(os.homedir(), '.kiro-remote', 'cloudflared');
-    const binaryPath = fs.existsSync(localBin) ? localBin : 'cloudflared';
+    const bin = await ensureCloudflared();
+    if (!bin) {
+      throw new Error('cloudflared unavailable (install manually: brew install cloudflared)');
+    }
 
     return new Promise((resolve, reject) => {
-      this.tunnelProcess = spawn(binaryPath, [
-        'tunnel', '--url', `http://localhost:${port}`
-      ]);
-
+      this.tunnelProcess = spawn(bin, ['tunnel', '--url', `http://localhost:${port}`]);
       let output = '';
-
-      this.tunnelProcess.stderr?.on('data', (data: Buffer) => {
+      const onData = (data: Buffer) => {
         output += data.toString();
-        // cloudflared prints the URL to stderr
         const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-        if (match) {
+        if (match && !this.publicUrl) {
           this.publicUrl = match[0];
           resolve(this.publicUrl);
         }
-      });
-
-      this.tunnelProcess.on('error', reject);
-
-      // Timeout after 15 seconds
-      setTimeout(() => reject(new Error('Tunnel startup timeout')), 15000);
+      };
+      this.tunnelProcess.stdout?.on('data', onData);
+      this.tunnelProcess.stderr?.on('data', onData);
+      this.tunnelProcess.on('error', (err) => reject(err));
+      setTimeout(() => reject(new Error('Tunnel startup timeout')), 20000);
     });
   }
 
@@ -73,23 +88,5 @@ export class TunnelManager {
 
   getUrl(): string | null {
     return this.publicUrl;
-  }
-
-  private async downloadCloudflared(): Promise<void> {
-    // Download the appropriate binary for macOS (arm64 or x64)
-    const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
-    const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${arch}`;
-    const dest = path.join(os.homedir(), '.kiro-remote', 'cloudflared');
-
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-
-    console.log(`📥 Downloading cloudflared for darwin-${arch}...`);
-    // Use curl (available on all Macs)
-    await execFileAsync('curl', ['-L', '-o', dest, url]);
-    fs.chmodSync(dest, '755');
-
-    // Add to PATH for this process
-    process.env.PATH = `${path.dirname(dest)}:${process.env.PATH}`;
-    console.log('✅ cloudflared installed to ~/.kiro-remote/cloudflared');
   }
 }

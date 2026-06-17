@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "test:ui": "node scripts/dev-test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
