@@ -22,7 +22,7 @@ function getLocalIP(): string {
   return '127.0.0.1';
 }
 
-function printBanner(localUrl: string, tunnelUrl: string | null, token: string) {
+function printBanner(localUrl: string, tunnelUrl: string | null, token: string, expiryMinutes = 60) {
   const line = '─'.repeat(47);
   console.log(`\n┌${line}┐`);
   console.log(`│   Kiro Remote Control — Session Started        │`);
@@ -38,7 +38,7 @@ function printBanner(localUrl: string, tunnelUrl: string | null, token: string) 
     console.log(`│   Remote: starting Cloudflare Tunnel...         │`);
     console.log(`│                                                 │`);
   }
-  console.log(`│   Session expires in: 60 minutes                │`);
+  console.log(`│   Session expires in: ${String(expiryMinutes).padStart(3)} minutes${' '.repeat(Math.max(0, 24 - String(expiryMinutes).length))}│`);
   console.log(`└${line}┘\n`);
 }
 
@@ -46,9 +46,11 @@ async function main() {
   // 1. Create session — use the token provided by the extension if present,
   //    so the QR code always matches the server the extension spawned.
   const fixedToken = process.env.KIRO_REMOTE_TOKEN;
-  const sessionManager = new SessionManager(3600, fixedToken);
+  const sessionTimeoutSec = parseInt(process.env.KIRO_REMOTE_SESSION_TIMEOUT ?? '3600', 10);
+  const sessionManager = new SessionManager(sessionTimeoutSec, fixedToken);
   const session = sessionManager.create();
   console.log(`Session token: ${session.token}${fixedToken ? ' (from extension)' : ' (generated)'}`);
+  console.log(`Session timeout: ${Math.round(sessionTimeoutSec / 60)} min`);
 
   // 2. Start server with proper error handling
   const server = createServer(sessionManager);
@@ -74,13 +76,19 @@ async function main() {
   const localUrl = `http://${localIP}:${PORT}/?token=${session.token}`;
 
   // 4. Print banner + QR
-  printBanner(localUrl, null, session.token);
+  printBanner(localUrl, null, session.token, Math.round(sessionTimeoutSec / 60));
   await printQRToTerminal(localUrl);
 
   // 5. Save QR PNG
   const qrDir = path.join(os.homedir(), '.kiro-remote');
   fs.mkdirSync(qrDir, { recursive: true });
   const qrPath = path.join(qrDir, 'qr.png');
+  const tunnelQrPath = path.join(qrDir, 'qr-tunnel.png');
+  // Remove any stale tunnel QR from a previous session. Quick-tunnel URLs change
+  // every restart (and Cloudflare recycles the subdomains), so a leftover PNG
+  // would point at a dead — or worse, someone else's — tunnel. We only write a
+  // fresh one once THIS session's tunnel is up.
+  try { fs.unlinkSync(tunnelQrPath); } catch { /* not present */ }
   try {
     await saveQRToPNG(localUrl, qrPath);
     console.log(`📸 QR saved to ${qrPath}`);
@@ -90,14 +98,15 @@ async function main() {
 
   // 6. Start Cloudflare Tunnel in background (non-blocking)
   const tunnel = new TunnelManager();
-  tunnel.start(PORT).then((tunnelUrl) => {
+  tunnel.start(PORT).then(async (tunnelUrl) => {
     const fullTunnelUrl = `${tunnelUrl}/?token=${session.token}`;
+    // Write the QR PNG BEFORE advertising the URL via /health, so the extension
+    // never reads a tunnelUrl whose PNG isn't on disk / is stale yet.
+    try { await saveQRToPNG(fullTunnelUrl, tunnelQrPath); } catch { /* ignore */ }
+    (server as any).setTunnelUrl?.(fullTunnelUrl);
     console.log(`\n🌐 Cloudflare Tunnel active:`);
     console.log(`   ${fullTunnelUrl}\n`);
-    // Store the tunnel URL in the server so /health exposes it to the extension
-    (server as any).setTunnelUrl?.(fullTunnelUrl);
     printQRToTerminal(fullTunnelUrl).catch(() => {});
-    saveQRToPNG(fullTunnelUrl, path.join(qrDir, 'qr-tunnel.png')).catch(() => {});
   }).catch((err) => {
     console.warn(`\n⚠️  Cloudflare Tunnel unavailable: ${err.message}`);
     console.warn('   For remote access, run: brew install cloudflared\n');

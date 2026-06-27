@@ -90,19 +90,19 @@ export function getExecutionResponse(executionId: string): string | undefined {
   return cache.get(executionId);
 }
 
-/** Extract the response from the actions array — last 'say' action wins. */
+/** Extract the response from the actions array — all 'say' messages joined. */
 function extractSayResponse(actions: unknown[]): string | undefined {
   if (!Array.isArray(actions)) return undefined;
-  let last: string | undefined;
+  const parts: string[] = [];
   for (const action of actions) {
     const a = action as Record<string, unknown>;
     if (a['actionType'] === 'say') {
       const output = a['output'] as Record<string, unknown> | undefined;
       const msg = output?.['message'];
       if (typeof msg === 'string' && msg.trim()) {
-        last = msg.trim();
+        parts.push(msg.trim());
       }
     }
   }
-  return last;
+  return parts.length ? parts.join('\n\n') : undefined;
 }

@@ -33,12 +33,14 @@ self.addEventListener('fetch', e => {
 // Push notification for approval requests (when app is in background)
 self.addEventListener('push', e => {
   const data = e.data?.json() ?? {};
+  const tool = data.toolName ? `${data.toolName}: ` : '';
   e.waitUntil(
     self.registration.showNotification('⚠️ Kiro needs approval', {
-      body: data.command ?? 'A command needs your approval',
+      body: tool + (data.command ?? 'A command needs your approval'),
       icon: '/icon-192.png',
       badge: '/icon-192.png',
       requireInteraction: true,
+      tag: data.requestId || 'kiro-approval',
       data: { url: self.location.origin }
     })
   );

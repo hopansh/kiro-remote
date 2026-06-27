@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#0d1117" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Kiro Remote" />
   <title>Kiro Remote</title>
   <link rel="manifest" href="/manifest.json" />
   <style>
@@ -17,28 +20,33 @@
       --mono: 'SF Mono','Fira Code',Consolas,monospace;
       --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     }
-    html,body { height:100%; background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; overflow:hidden; }
-    #app { display:flex; flex-direction:column; height:100%; height:100dvh; padding-bottom:env(safe-area-inset-bottom); }
+    html,body { height:100%; background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; overflow:hidden; overscroll-behavior:none; }
+    #app { display:flex; flex-direction:column; height:100%; height:100dvh; }
 
-    /* HEADER */
-    #header { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--bg2); border-bottom:1px solid var(--border); }
-    #header-left { display:flex; align-items:center; gap:8px; }
+    /* TOP BAR — compact: status dot + machine info + agent badge in ONE row */
+    #topbar { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:7px 12px; padding-top:max(7px,env(safe-area-inset-top,7px)); background:var(--bg2); border-bottom:1px solid var(--border); }
     #status-dot { width:9px; height:9px; border-radius:50%; background:var(--red); transition:background .3s; flex-shrink:0; }
     #status-dot.connected { background:var(--green); }
-    #app-name { font-weight:700; font-size:15px; }
-    #machine-info { font-size:11px; color:var(--text2); font-family:var(--mono); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-    /* AGENT STATE BAR */
-    #state-bar { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--bg3); border-bottom:1px solid var(--border); }
-    #agent-badge { padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; font-family:var(--mono); border:1px solid var(--border); color:var(--text2); background:var(--bg2); }
+    #machine-info { flex:1; min-width:0; font-size:11px; color:var(--text2); font-family:var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #agent-badge { flex-shrink:0; padding:2px 9px; border-radius:20px; font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; font-family:var(--mono); border:1px solid var(--border); color:var(--text2); background:var(--bg3); }
     #agent-badge.running { color:var(--accent); border-color:var(--accent); background:rgba(88,166,255,.08); }
     #agent-badge.waiting { color:var(--yellow); border-color:var(--yellow); background:rgba(210,153,34,.1); animation:pulse 1.4s ease-in-out infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-    #current-task { flex:1; font-size:12px; color:var(--text2); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    /* Current task: slim line below the bar, auto-hidden when there's nothing to show */
+    #current-task { flex-shrink:0; font-size:11px; color:var(--text2); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:5px 12px; background:var(--bg3); border-bottom:1px solid var(--border); }
+    #current-task:empty { display:none; }
+
+    /* INSTALL BANNER — nudges PWA install for true full-screen (no browser chrome) */
+    #install-banner { display:none; align-items:center; justify-content:space-between; gap:10px; padding:8px 12px; background:rgba(88,166,255,.12); border-bottom:1px solid var(--border); font-size:12px; color:var(--accent); flex-shrink:0; }
+    #install-banner.visible { display:flex; }
+    #install-banner .ib-actions { display:flex; gap:6px; align-items:center; }
+    #install-banner button { border:none; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+    #install-btn { background:var(--accent); color:#0d1117; }
+    #install-dismiss { background:transparent; color:var(--text2); padding:5px 8px; }
 
     /* TABS */
     #tabs { flex-shrink:0; display:flex; background:var(--bg2); border-bottom:1px solid var(--border); }
-    .tab { flex:1; padding:9px 0; text-align:center; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:color .2s,border-color .2s; -webkit-tap-highlight-color:transparent; }
+    .tab { flex:1; padding:8px 0; text-align:center; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:color .2s,border-color .2s; -webkit-tap-highlight-color:transparent; }
     .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
     /* PANELS — base: hidden; only .active shows as flex column */
@@ -70,8 +78,12 @@
     .from-kiro .chat-bubble blockquote { border-left:3px solid var(--border); margin:4px 0; padding-left:10px; color:var(--text2); }
     .chat-meta { font-size:10px; color:var(--text2); margin-top:3px; font-family:var(--mono); opacity:.7; }
     .from-phone .chat-meta { text-align:right; }
+    /* Live "thinking" bubble — muted, italic, dashed border */
+    .chat-msg.thinking .chat-bubble { background:transparent; border:1px dashed var(--border); color:var(--text2); font-style:italic; opacity:.85; }
+    .chat-msg.thinking .think-label { font-style:normal; font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--text2); margin-bottom:5px; opacity:.8; }
     #chat-empty { padding:40px 20px; text-align:center; color:var(--text2); opacity:.5; font-size:13px; }
     #chat-hint { padding:7px 14px; font-size:11px; color:var(--text2); text-align:center; border-bottom:1px solid var(--border); background:var(--bg3); flex-shrink:0; }
+    #chat-hint.hidden { display:none; }
     /* Typing indicator */
     .typing-bubble { display:flex; gap:4px; align-items:center; padding:10px 14px; }
     .typing-dot { width:7px; height:7px; border-radius:50%; background:var(--text2); animation:blink 1.2s ease-in-out infinite; }
@@ -94,7 +106,7 @@
     /* APPROVAL MODAL */
     #approval-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:100; flex-direction:column; align-items:stretch; justify-content:flex-end; backdrop-filter:blur(4px); }
     #approval-modal.visible { display:flex; }
-    #approval-sheet { background:var(--bg2); border-top:1px solid var(--border); border-radius:18px 18px 0 0; padding:18px 18px max(18px,env(safe-area-inset-bottom,18px)); max-height:88vh; overflow-y:auto; animation:slideUp .22s ease; }
+    #approval-sheet { background:var(--bg2); border-top:1px solid var(--border); border-radius:18px 18px 0 0; padding:18px 18px max(18px,env(safe-area-inset-bottom,18px)); max-height:88dvh; overflow-y:auto; animation:slideUp .22s ease; }
     @keyframes slideUp { from{transform:translateY(100%)} to{transform:none} }
     #approval-handle { width:36px; height:4px; background:var(--border); border-radius:2px; margin:0 auto 14px; }
     #approval-title { font-size:12px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--yellow); margin-bottom:6px; }
@@ -148,16 +160,19 @@
 </div>
 
 <div id="app">
-  <div id="header">
-    <div id="header-left">
-      <div id="status-dot"></div>
-      <div><div id="app-name">Kiro Remote</div><div id="machine-info">Connecting…</div></div>
-    </div>
+  <div id="topbar">
+    <div id="status-dot"></div>
+    <div id="machine-info">Connecting…</div>
+    <div id="agent-badge" class="idle">◎ IDLE</div>
   </div>
+  <div id="current-task"></div>
 
-  <div id="state-bar">
-    <div id="agent-badge" class="idle">IDLE</div>
-    <div id="current-task"></div>
+  <div id="install-banner">
+    <span>📲 Install for full-screen (no address bar)</span>
+    <div class="ib-actions">
+      <button id="install-btn">Install</button>
+      <button id="install-dismiss" aria-label="Dismiss">✕</button>
+    </div>
   </div>
 
   <div id="tabs">
@@ -228,6 +243,12 @@ let ws = null, wsRetryTimer = null;
 let currentApprovalId = null, approvalTimerInterval = null;
 let pingInterval = null;
 let wsAttempts = 0;
+let machineName = 'Kiro';
+let sessionExpiresAt = null;
+let expiryTicker = null;
+let stickToBottom = true;   // chat auto-follows newest message until user scrolls up
+let deferredPrompt = null;  // captured beforeinstallprompt event
+let historyTimer = null;    // fallback timer for the session-loading state
 
 // uid() is only available in HTTPS/secure contexts.
 // Since this page loads over HTTP on local network, we need a fallback.
@@ -257,6 +278,8 @@ if (!token) {
   registerSW();
   setupDebugToggle();
   connectWS();
+  setupPush();
+  setupInstallPrompt();
   setupTabs();
   setupInput();
   setupSessionSearch();
@@ -266,6 +289,78 @@ if (!token) {
 
 function registerSW() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// ── Install prompt (PWA) ──────────────────────────────────────────
+// Installing gives a true full-screen app with no browser address bar — the
+// only reliable way to reclaim that space in a mobile browser tab.
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } }
+
+function setupInstallPrompt() {
+  if (isStandalone()) return; // already full-screen
+  const banner = document.getElementById('install-banner');
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (lsGet('kr-install-dismissed') === '1') return;
+    banner.classList.add('visible');
+  });
+  document.getElementById('install-btn').addEventListener('click', async () => {
+    banner.classList.remove('visible');
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try { await deferredPrompt.userChoice; } catch { /* ignore */ }
+    deferredPrompt = null;
+  });
+  document.getElementById('install-dismiss').addEventListener('click', () => {
+    banner.classList.remove('visible');
+    lsSet('kr-install-dismissed', '1');
+  });
+  window.addEventListener('appinstalled', () => banner.classList.remove('visible'));
+}
+
+// ── Web Push subscription ─────────────────────────────────────────
+// Lets approval notifications arrive even when the PWA is backgrounded.
+// Requires a secure context (HTTPS tunnel or localhost) — silently skipped on
+// plain-HTTP local WiFi, where the in-page Notification fallback still works.
+async function setupPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) { dbg('Push: unsupported'); return; }
+    if (!window.isSecureContext) { dbg('Push: needs HTTPS (use the tunnel URL)'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { dbg('Push: notifications not granted'); return; }
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const res = await fetch(`${location.origin}/push/vapid-public-key?token=${token}`);
+      if (!res.ok) { dbg('Push: no VAPID key'); return; }
+      const { publicKey } = await res.json();
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(publicKey),
+      });
+    }
+    await fetch(`${location.origin}/push/subscribe?token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+    dbg('Push: subscribed ✓');
+  } catch (e) { dbg('Push setup failed: ' + e); }
+}
+
+function urlB64ToUint8Array(b64) {
+  const padding = '='.repeat((4 - (b64.length % 4)) % 4);
+  const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
 }
 
 // ── Minimal Markdown renderer ────────────────────────────────────
@@ -394,7 +489,8 @@ function showExpired() {
 
 function setConnected(ok) {
   document.getElementById('status-dot').classList.toggle('connected', ok);
-  if (!ok) document.getElementById('machine-info').textContent = 'Reconnecting…';
+  if (ok) renderHeaderInfo();
+  else document.getElementById('machine-info').textContent = 'Reconnecting…';
 }
 
 // ── Message Handler ──────────────────────────────────────────────
@@ -409,9 +505,32 @@ function handleMessage(msg) {
 }
 
 function onSessionInfo(msg) {
-  const parts = [msg.machineName || 'Kiro'];
-  if (msg.workspaceName) parts.push(msg.workspaceName);
-  document.getElementById('machine-info').textContent = parts.join(' · ');
+  // Header shows the machine name only. Per-window workspace is shown per
+  // session in the Sessions list / chat header, so it stays correct even with
+  // multiple Kiro windows connected.
+  machineName = msg.machineName || 'Kiro';
+  if (msg.expiresAt) sessionExpiresAt = msg.expiresAt;
+  renderHeaderInfo();
+  startExpiryTicker();
+}
+
+function renderHeaderInfo() {
+  let text = machineName;
+  if (sessionExpiresAt) {
+    const remMin = Math.max(0, Math.round((sessionExpiresAt - Date.now()) / 60000));
+    text += ` · session ${remMin}m`;
+  }
+  document.getElementById('machine-info').textContent = text;
+}
+
+function startExpiryTicker() {
+  if (expiryTicker) clearInterval(expiryTicker);
+  expiryTicker = setInterval(() => {
+    if (!sessionExpiresAt) return;
+    if (Date.now() >= sessionExpiresAt) { clearInterval(expiryTicker); expiryTicker = null; showExpired(); return; }
+    // Only refresh the header if we're showing connection info (not "Reconnecting…")
+    if (document.getElementById('status-dot').classList.contains('connected')) renderHeaderInfo();
+  }, 30000);
 }
 
 function onStatusUpdate(msg) {
@@ -421,11 +540,6 @@ function onStatusUpdate(msg) {
   badge.className = msg.agentState === 'running' ? 'running' : msg.agentState === 'waiting_approval' ? 'waiting' : '';
   badge.textContent = msg.agentState === 'running' ? '● RUNNING' : msg.agentState === 'waiting_approval' ? '⚠ WAITING' : '◎ IDLE';
   taskEl.textContent = msg.currentTask || '';
-  if (msg.workspaceName) {
-    const parts = [(document.getElementById('machine-info').textContent.split(' · ')[0])];
-    parts.push(msg.workspaceName);
-    document.getElementById('machine-info').textContent = parts.join(' · ');
-  }
   // Show typing indicator in chat when Kiro starts running after we sent a message
   if (msg.agentState === 'running' && activeSession) {
     showTypingIndicator();
@@ -439,16 +553,71 @@ const messagesBySession = {};   // sessionId -> [{ text, fromPhone, ts }]
 
 function onChatMessage(msg) {
   const fromPhone = (msg.role === 'user');
-  const sid = msg.sessionId || '__active__';
+  // Live assistant chunks can arrive without a sessionId; if a chat is open,
+  // render them there so streaming always shows in the active conversation.
+  const sid = msg.sessionId || (activeSession && activeSession.sessionId) || '__active__';
   if (!messagesBySession[sid]) messagesBySession[sid] = [];
-  // Dedupe by message id — every Kiro message has a unique UUID.
   const msgId = msg.id || (msg.role + '|' + msg.text + '|' + msg.timestamp);
-  if (messagesBySession[sid].some(m => m.id === msgId)) return;
+  const isActive = activeSession && activeSession.sessionId === sid;
+
+  // Reconcile the optimistic local echo of a message we just sent, so it
+  // doesn't appear twice (our 'phone-…' bubble + the server's echoed copy).
+  if (fromPhone) {
+    const echo = messagesBySession[sid].find(m => m.local && m.text === msg.text);
+    if (echo) {
+      if (echo.id !== msgId && isActive) {
+        const el = document.querySelector(`[data-msg-id="${cssEscape(echo.id)}"]`);
+        if (el) el.dataset.msgId = msgId;
+      }
+      echo.id = msgId;
+      echo.local = false; // reconciled — single bubble kept
+      return;
+    }
+  }
+
+  // Live "thinking" bubbles (reason-<execId>) are transient: show them while
+  // Kiro reasons, then drop them once the real response (exec-<execId>) lands.
+  if (msg.thinking) {
+    const execId = msgId.startsWith('reason-') ? msgId.slice('reason-'.length) : null;
+    // If the response for this execution already exists, ignore stale thinking.
+    if (execId && messagesBySession[sid].some(m => m.id === `exec-${execId}`)) return;
+    const existingT = messagesBySession[sid].find(m => m.id === msgId);
+    if (existingT) {
+      if (existingT.text === msg.text) return;
+      existingT.text = msg.text;
+      if (isActive) updateBubble(msgId, msg.text, false, true);
+    } else {
+      messagesBySession[sid].push({ id: msgId, text: msg.text, fromPhone: false, ts: msg.timestamp, thinking: true });
+      if (isActive) appendBubble(msg.text, false, msg.timestamp, false, msgId, true);
+    }
+    return;
+  }
+
+  // A real response arrived — drop the matching thinking bubble.
+  if (msgId.startsWith('exec-')) {
+    const tId = 'reason-' + msgId.slice('exec-'.length);
+    const tIdx = messagesBySession[sid].findIndex(m => m.id === tId);
+    if (tIdx >= 0) {
+      messagesBySession[sid].splice(tIdx, 1);
+      if (isActive) document.querySelector(`[data-msg-id="${cssEscape(tId)}"]`)?.remove();
+    }
+  }
+
+  // If we've seen this id before, treat it as a live UPDATE (streaming tokens
+  // grow the same message) rather than a duplicate to ignore.
+  const existing = messagesBySession[sid].find(m => m.id === msgId);
+  if (existing) {
+    if (existing.text === msg.text) return; // nothing changed
+    existing.text = msg.text;
+    if (isActive) updateBubble(msgId, msg.text, fromPhone);
+    return;
+  }
+
   messagesBySession[sid].push({ id: msgId, text: msg.text, fromPhone, ts: msg.timestamp });
 
   // If this message belongs to the currently-open session, render it live
-  if (activeSession && activeSession.sessionId === sid) {
-    appendBubble(msg.text, fromPhone, msg.timestamp);
+  if (isActive) {
+    appendBubble(msg.text, fromPhone, msg.timestamp, false, msgId);
   }
 }
 
@@ -469,27 +638,61 @@ function renderActiveSessionMessages() {
   }
   // Sort by timestamp so order is correct
   list.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-  for (const m of list) appendBubble(m.text, m.fromPhone, m.ts, true);
-  msgs.scrollTop = msgs.scrollHeight;
+  for (const m of list) appendBubble(m.text, m.fromPhone, m.ts, true, m.id, m.thinking);
+  // Freshly opened session → start pinned to the latest message.
+  stickToBottom = true;
+  scrollChatToBottom();
+}
+
+/** Scroll the chat to the newest message (after layout settles). */
+function scrollChatToBottom() {
+  const msgs = document.getElementById('chat-messages');
+  requestAnimationFrame(() => {
+    msgs.scrollTop = msgs.scrollHeight;
+    // A second pass catches late layout (markdown, wrapping) on first open.
+    requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
+  });
 }
 
 /** Append a single chat bubble to the chat-messages container. */
-function appendBubble(text, fromPhone, ts, noScroll) {
+function appendBubble(text, fromPhone, ts, noScroll, msgId, thinking) {
   const msgs = document.getElementById('chat-messages');
-  const empty = document.getElementById('chat-empty');
-  if (empty) empty.remove();
-  // Remove typing indicator if showing a real response
+  document.getElementById('chat-empty')?.remove();
+  document.getElementById('chat-loading')?.remove();
+  // Remove typing indicator once any real assistant content (thinking or response) shows
   if (!fromPhone) removeTypingIndicator();
   const div = document.createElement('div');
-  div.className = `chat-msg ${fromPhone ? 'from-phone' : 'from-kiro'}`;
+  div.className = `chat-msg ${fromPhone ? 'from-phone' : 'from-kiro'}${thinking ? ' thinking' : ''}`;
+  if (msgId) div.dataset.msgId = msgId;
+  const label = thinking ? '<div class="think-label">💭 thinking…</div>' : '';
   const content = fromPhone ? esc(text) : renderMarkdown(text);
-  div.innerHTML = `<div class="chat-bubble">${content}</div><div class="chat-meta">${fmtTime(ts || Date.now())}</div>`;
+  div.innerHTML = `<div class="chat-bubble">${label}${content}</div><div class="chat-meta">${fmtTime(ts || Date.now())}</div>`;
   msgs.appendChild(div);
+  // Always follow the newest message when the user sent it; otherwise follow
+  // only while pinned to the bottom.
   if (!noScroll) {
-    const atBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 60;
-    if (atBottom) msgs.scrollTop = msgs.scrollHeight;
+    if (fromPhone || stickToBottom) { stickToBottom = true; scrollChatToBottom(); }
     else updateScrollBtn();
   }
+}
+
+/** Update an existing bubble's text in place (live streaming). */
+function updateBubble(msgId, text, fromPhone, thinking) {
+  const msgs = document.getElementById('chat-messages');
+  const div = msgs.querySelector(`[data-msg-id="${cssEscape(msgId)}"]`);
+  if (!div) { appendBubble(text, fromPhone, Date.now(), false, msgId, thinking); return; }
+  const bubble = div.querySelector('.chat-bubble');
+  if (bubble) {
+    const label = thinking ? '<div class="think-label">💭 thinking…</div>' : '';
+    bubble.innerHTML = label + (fromPhone ? esc(text) : renderMarkdown(text));
+  }
+  if (stickToBottom) scrollChatToBottom();
+}
+
+/** Escape a value for safe use inside a CSS attribute selector. */
+function cssEscape(s) {
+  if (window.CSS && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/["\\\]]/g, '\\$&');
 }
 
 /** Locally record + render a message the user just sent. */
@@ -497,9 +700,9 @@ function addChatMessage(text, fromPhone, ts, sessionId) {
   const sid = sessionId || (activeSession && activeSession.sessionId) || '__active__';
   if (!messagesBySession[sid]) messagesBySession[sid] = [];
   const msgId = 'phone-' + ts;
-  messagesBySession[sid].push({ id: msgId, text, fromPhone, ts });
+  messagesBySession[sid].push({ id: msgId, text, fromPhone, ts, local: fromPhone });
   if (activeSession && activeSession.sessionId === sid) {
-    appendBubble(text, fromPhone, ts);
+    appendBubble(text, fromPhone, ts, false, msgId);
   }
 }
 
@@ -512,7 +715,7 @@ function showTypingIndicator() {
   div.className = 'chat-msg from-kiro';
   div.innerHTML = '<div class="chat-bubble typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
   msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
+  if (stickToBottom) scrollChatToBottom();
 }
 
 function removeTypingIndicator() {
@@ -523,9 +726,15 @@ function removeTypingIndicator() {
 function setupScrollBtn() {
   const msgs = document.getElementById('chat-messages');
   const btn = document.getElementById('scroll-btn');
-  msgs.addEventListener('scroll', updateScrollBtn);
+  msgs.addEventListener('scroll', () => {
+    const atBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+    // User scrolling up pauses auto-follow; scrolling back to the bottom resumes it.
+    stickToBottom = atBottom;
+    updateScrollBtn();
+  });
   btn.addEventListener('click', () => {
-    msgs.scrollTop = msgs.scrollHeight;
+    stickToBottom = true;
+    scrollChatToBottom();
     btn.classList.remove('visible');
   });
 }
@@ -729,10 +938,14 @@ function renderSessions(filter) {
 
 function openSession(session) {
   activeSession = session;
+  stickToBottom = true;
 
   // Switch to chat tab
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === 'chat'));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-chat'));
+
+  // Hide the "select a session" hint — we're in a session now.
+  document.getElementById('chat-hint').classList.add('hidden');
 
   // Show back button
   const back = document.getElementById('chat-back');
@@ -750,7 +963,15 @@ function openSession(session) {
   const msgs = document.getElementById('chat-messages');
   msgs.innerHTML = '<div id="chat-loading" style="padding:40px 20px;text-align:center;color:var(--text2);font-size:13px;">Loading messages…</div>';
 
-  renderActiveSessionMessages();
+  // Fallback: if no history arrives shortly, show the empty state (so the
+  // loader doesn't spin forever on a genuinely empty session).
+  clearTimeout(historyTimer);
+  historyTimer = setTimeout(() => {
+    if (activeSession && activeSession.sessionId === session.sessionId
+        && (messagesBySession[session.sessionId] || []).length === 0) {
+      renderActiveSessionMessages();
+    }
+  }, 2500);
 
   // Request the full history for this specific session from the extension
   // (the live stream only covers recent sessions; this fetches older ones).
@@ -763,8 +984,6 @@ function openSession(session) {
       timestamp: Date.now()
     }));
   }
-
-  addActivity('🗂', `<span class="entry-badge badge-tool">OPENED</span>${esc(session.title)} (${esc(session.workspaceName)})`, Date.now());
 }
 
 function setupSessionSearch() {
@@ -776,6 +995,7 @@ function setupChatBack() {
   document.getElementById('chat-back').addEventListener('click', () => {
     activeSession = null;
     document.getElementById('chat-back').classList.remove('visible');
+    document.getElementById('chat-hint').classList.remove('hidden');
     document.getElementById('msg-input').placeholder = 'Message Kiro…';
     renderActiveSessionMessages();
     // Switch to sessions tab

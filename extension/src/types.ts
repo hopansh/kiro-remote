@@ -37,12 +37,16 @@ export interface ApprovalRequestMessage extends BaseMessage {
   toolName: string;
   context?: string;
   timeoutSeconds: number;
+  /** For multi-choice questions (e.g. Kiro's userInput) — render as buttons. */
+  options?: Array<{ id: string; label: string }>;
 }
 
 export interface ApprovalResponseMessage extends BaseMessage {
   type: 'approval_response';
   requestId: string;
   approved: boolean;
+  /** Chosen option label for multi-choice questions (overrides approved mapping). */
+  answer?: string;
   note?: string;
 }
 
@@ -116,6 +120,8 @@ export interface ChatMessageMessage extends BaseMessage {
   text: string;
   sessionId: string;
   sessionTitle: string;
+  /** true for live "thinking"/reasoning bubbles (rendered muted on the phone). */
+  thinking?: boolean;
 }
 
 export interface RequestRefreshMessage extends BaseMessage {

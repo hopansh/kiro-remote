@@ -5,7 +5,12 @@ import { KiroMessage, ApprovalRequestMessage, ApprovalResponseMessage, SendInstr
 import { ChatMessage } from './chatWatcher';
 import { randomUUID } from 'crypto';
 
-type ApprovalResolver = (approved: boolean) => void;
+type ApprovalResolver = (result: ApprovalResult) => void;
+
+export interface ApprovalResult {
+  approved: boolean;
+  answer?: string;
+}
 
 // Minimal WebSocket frame decoder/encoder for text frames only
 function encodeFrame(data: string): Buffer {
@@ -264,7 +269,7 @@ export class RelayClient {
     }
   }
 
-  async sendApprovalRequest(message: ApprovalRequestMessage): Promise<boolean> {
+  async sendApprovalRequest(message: ApprovalRequestMessage): Promise<ApprovalResult> {
     return new Promise((resolve) => {
       this.pendingApprovals.set(message.id, resolve);
       this.send(message);
@@ -273,7 +278,7 @@ export class RelayClient {
       setTimeout(() => {
         if (this.pendingApprovals.has(message.id)) {
           this.pendingApprovals.delete(message.id);
-          resolve(false); // deny on timeout
+          resolve({ approved: false }); // deny on timeout
         }
       }, (message.timeoutSeconds + 5) * 1000);
     });
@@ -301,7 +306,7 @@ export class RelayClient {
         const response = msg as ApprovalResponseMessage;
         const resolver = this.pendingApprovals.get(response.requestId);
         if (resolver) {
-          resolver(response.approved);
+          resolver({ approved: response.approved, answer: response.answer });
           this.pendingApprovals.delete(response.requestId);
         }
       }

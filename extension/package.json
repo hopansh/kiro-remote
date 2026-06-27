@@ -2,7 +2,7 @@
   "name": "kiro-remote-control",
   "displayName": "Kiro Remote Control",
   "description": "Control your Kiro IDE from your Android phone — view chat, approve tool calls, and send messages remotely.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "kiro-remote-control",
   "icon": "icon.png",
   "engines": { "vscode": "^1.85.0" },
@@ -70,6 +70,16 @@
           "type": "number",
           "default": 60,
           "description": "Seconds to wait for phone approval before auto-denying"
+        },
+        "kiroRemote.sessionTimeoutMinutes": {
+          "type": "number",
+          "default": 60,
+          "description": "Minutes a remote session stays valid before the QR/token expires"
+        },
+        "kiroRemote.preventSleep": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep your Mac awake (via 'caffeinate') while a remote session is active, so the relay stays reachable from your phone"
         }
       }
     }

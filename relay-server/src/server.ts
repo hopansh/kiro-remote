@@ -16,10 +16,17 @@ import {
 } from './types';
 import { randomUUID } from 'crypto';
 import { rlog } from './log';
+import { initPush, getPublicKey, addSubscription, sendPush } from './push';
+
+// Approval timeout (seconds) — single source shared by the WS approval path and
+// the hook approval path, so both behave consistently. Provided by the
+// extension via env (mirrors kiroRemote.approvalTimeoutSeconds).
+const APPROVAL_TIMEOUT_SEC = parseInt(process.env.KIRO_REMOTE_APPROVAL_TIMEOUT ?? '60', 10);
 
 interface PendingApproval {
   resolve: (approved: boolean) => void;
   timeout: NodeJS.Timeout;
+  key: string;
 }
 
 // ── Simple in-memory rate limiter ────────────────────────────────
@@ -28,7 +35,15 @@ const rateLimits = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 60_000;  // 1 minute window
 const RATE_MAX       = 30;      // max 30 requests per IP per minute on auth endpoints
 
+function isLoopback(ip: string): boolean {
+  const clean = ip.replace('::ffff:', '');
+  return clean === '127.0.0.1' || clean === '::1' || clean === 'localhost';
+}
+
 function checkRateLimit(ip: string): boolean {
+  // Loopback is the local extension itself — never throttle it. The limiter
+  // exists to stop remote brute-force of the token, not local polling.
+  if (isLoopback(ip)) return true;
   const now = Date.now();
   const entry = rateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
@@ -85,6 +100,9 @@ export function createServer(sessionManager: SessionManager) {
 
   // Tunnel URL — set after cloudflared connects
   let tunnelUrl: string | null = null;
+
+  // Initialize Web Push (VAPID). Safe no-op if it can't init.
+  initPush();
 
   // ── Request logging ───────────────────────────────────────────
   app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -156,6 +174,7 @@ export function createServer(sessionManager: SessionManager) {
       status: 'ok',
       sessionId: session?.id ?? null,
       token: session?.token ?? null,
+      build: process.env.KIRO_REMOTE_BUILD ?? '',
       tunnelUrl: tunnelUrl ?? null,
       connected: {
         extension: session?.extensionConnected ?? false,
@@ -186,6 +205,8 @@ export function createServer(sessionManager: SessionManager) {
     res.json({
       machineName: os.hostname(),
       connectedAt: Date.now(),
+      expiresAt: session.expiresAt,
+      approvalTimeoutSeconds: APPROVAL_TIMEOUT_SEC,
     });
   });
 
@@ -194,6 +215,19 @@ export function createServer(sessionManager: SessionManager) {
   app.post('/hook/post-tool-use', requireToken, hookPostToolUse);
   app.post('/hook/task-start',    requireToken, hookTaskStart);
   app.post('/hook/task-complete', requireToken, hookTaskComplete);
+
+  // ── Web Push routes — token-protected ──
+  app.get('/push/vapid-public-key', requireToken, (_req: Request, res: Response) => {
+    const key = getPublicKey();
+    if (!key) { res.status(503).json({ error: 'Push not available' }); return; }
+    res.json({ publicKey: key });
+  });
+  app.post('/push/subscribe', requireToken, (req: Request, res: Response) => {
+    const sub = req.body as { endpoint?: string };
+    if (!sub?.endpoint) { res.status(400).json({ error: 'Invalid subscription' }); return; }
+    addSubscription(sub as Parameters<typeof addSubscription>[0]);
+    res.json({ ok: true });
+  });
 
   // ── Catch-all 404 — don't leak route info ──
   app.use((_req: Request, res: Response) => {
@@ -210,8 +244,11 @@ export function createServer(sessionManager: SessionManager) {
     res.status(500).json({ error: 'Internal server error' });
   });
 
-  // Pending approvals map
+  // Pending approvals map (unified: shared by WS approvals + hook approvals)
   const pendingApprovals = new Map<string, PendingApproval>();
+  // Dedup: tool+command -> requestId currently awaiting a decision, so the
+  // poll-based and hook-based paths don't show two modals for the same action.
+  const inFlightApprovalKey = new Map<string, string>();
 
   // HTTP server
   const httpServer = http.createServer(app);
@@ -219,18 +256,37 @@ export function createServer(sessionManager: SessionManager) {
   // WebSocket server
   const wss = new WebSocket.Server({ noServer: true });
 
-  let extensionWs: WebSocket.WebSocket | null = null;
+  // Multiple Kiro windows can each connect an extension socket. We keep them all
+  // and route appropriately (see sendToExtension / sendToPrimaryExtension).
+  const extensionClients = new Set<WebSocket.WebSocket>();
+  // Per-extension reported state, so we can broadcast an AGGREGATE status to the
+  // phone (most active wins) instead of letting windows clobber each other.
+  const extensionState = new Map<WebSocket.WebSocket, 'idle' | 'running' | 'waiting_approval'>();
   const mobileClients = new Set<WebSocket.WebSocket>();
 
   let lastSessionList: KiroMessage | null = null;
+  let lastAggregateStatus: 'idle' | 'running' | 'waiting_approval' = 'idle';
   const recentChatMessages: KiroMessage[] = [];
 
   function broadcastToMobile(message: KiroMessage) {
     if (message.type === 'session_list') {
       lastSessionList = message;
     } else if (message.type === 'chat_message') {
-      recentChatMessages.push(message);
-      if (recentChatMessages.length > 200) recentChatMessages.shift();
+      // Keep the replay buffer to ONE entry per id (latest text wins), so a
+      // newly-connected phone gets the current version without partial dupes.
+      // We always forward to connected phones below — the phone dedups/updates
+      // by id itself, and on-demand history replay MUST reach the phone even if
+      // the same id was streamed live earlier this session.
+      const id = (message as { id: string }).id;
+      const existingIdx = recentChatMessages.findIndex(
+        m => m.type === 'chat_message' && (m as { id: string }).id === id
+      );
+      if (existingIdx >= 0) {
+        recentChatMessages[existingIdx] = message;
+      } else {
+        recentChatMessages.push(message);
+        if (recentChatMessages.length > 200) recentChatMessages.shift();
+      }
     }
     const payload = JSON.stringify(message);
     for (const client of mobileClients) {
@@ -240,10 +296,41 @@ export function createServer(sessionManager: SessionManager) {
     }
   }
 
+  /** Send to ALL connected extensions (e.g. approval responses; each extension
+   *  ignores ones it doesn't have a pending request for). */
   function sendToExtension(message: KiroMessage) {
-    if (extensionWs?.readyState === WebSocket.OPEN) {
-      extensionWs.send(JSON.stringify(message));
+    const payload = JSON.stringify(message);
+    for (const ws of extensionClients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
+  }
+
+  /** Send to ONE extension only (e.g. instructions / session loads) so the
+   *  action isn't executed in every open window. */
+  function sendToPrimaryExtension(message: KiroMessage) {
+    for (const ws of extensionClients) {
+      if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(message)); return; }
+    }
+  }
+
+  /** Recompute and broadcast the aggregate agent status across all windows. */
+  function recomputeAggregateStatus(template?: KiroMessage) {
+    let agg: 'idle' | 'running' | 'waiting_approval' = 'idle';
+    for (const s of extensionState.values()) {
+      if (s === 'waiting_approval') { agg = 'waiting_approval'; break; }
+      if (s === 'running') agg = 'running';
+    }
+    if (agg === lastAggregateStatus) return;
+    lastAggregateStatus = agg;
+    const base = template as { currentTask?: string; workspaceName?: string } | undefined;
+    broadcastToMobile({
+      type: 'status_update',
+      id: randomUUID(),
+      timestamp: Date.now(),
+      agentState: agg,
+      currentTask: agg === 'idle' ? undefined : base?.currentTask,
+      workspaceName: base?.workspaceName,
+    } as KiroMessage);
   }
 
   // ── WebSocket upgrade — auth at the transport layer ───────────
@@ -294,9 +381,9 @@ export function createServer(sessionManager: SessionManager) {
     const session = sessionManager.get();
 
     if (role === 'extension') {
-      extensionWs = ws;
+      extensionClients.add(ws);
       if (session) session.extensionConnected = true;
-      rlog('ws', '🔌 Extension connected');
+      rlog('ws', `🔌 Extension connected (total: ${extensionClients.size})`);
 
       ws.on('message', (data: WebSocket.RawData) => {
         // Enforce message size limit (1 MB)
@@ -306,16 +393,18 @@ export function createServer(sessionManager: SessionManager) {
         }
         try {
           const msg: KiroMessage = JSON.parse(data.toString());
-          handleExtensionMessage(msg);
+          handleExtensionMessage(msg, ws);
         } catch (e) {
           rlog('ws', `Failed to parse extension message: ${e}`);
         }
       });
 
       ws.on('close', () => {
-        extensionWs = null;
-        if (session) session.extensionConnected = false;
-        rlog('ws', '🔌 Extension disconnected');
+        extensionClients.delete(ws);
+        extensionState.delete(ws);
+        if (session) session.extensionConnected = extensionClients.size > 0;
+        recomputeAggregateStatus();
+        rlog('ws', `🔌 Extension disconnected (remaining: ${extensionClients.size})`);
       });
 
     } else if (role === 'mobile') {
@@ -331,6 +420,8 @@ export function createServer(sessionManager: SessionManager) {
           sessionId: session.id,
           machineName: os.hostname(),
           connectedAt: Date.now(),
+          expiresAt: session.expiresAt,
+          approvalTimeoutSeconds: APPROVAL_TIMEOUT_SEC,
         }));
       }
       if (lastSessionList) {
@@ -339,13 +430,12 @@ export function createServer(sessionManager: SessionManager) {
       for (const m of recentChatMessages) {
         ws.send(JSON.stringify(m));
       }
-      if (extensionWs?.readyState === WebSocket.OPEN) {
-        extensionWs.send(JSON.stringify({
-          type: 'request_refresh',
-          id: randomUUID(),
-          timestamp: Date.now(),
-        }));
-      }
+      // Ask one window to resend its state (sessions + history) for this phone.
+      sendToPrimaryExtension({
+        type: 'request_refresh',
+        id: randomUUID(),
+        timestamp: Date.now(),
+      } as KiroMessage);
 
       ws.on('message', (data: WebSocket.RawData) => {
         // Enforce message size limit (64 KB for phone messages)
@@ -369,33 +459,82 @@ export function createServer(sessionManager: SessionManager) {
     }
   });
 
-  function handleExtensionMessage(msg: KiroMessage) {
+  // ── Unified approval coordinator ──────────────────────────────
+  // Both the WS approval path (extension's ApprovalWatcher) and the hook path
+  // (/hook/pre-tool-use) funnel through here, so behaviour + timeout are
+  // identical and duplicate prompts for the same action are coalesced.
+  function registerApproval(req: ApprovalRequestMessage, onResolve: (approved: boolean) => void) {
+    const key = `${req.toolName}|${req.command}`;
+
+    // If an identical action is already awaiting a decision, attach to it
+    // instead of showing a second modal/notification.
+    const existingId = inFlightApprovalKey.get(key);
+    if (existingId && pendingApprovals.has(existingId)) {
+      const existing = pendingApprovals.get(existingId)!;
+      const prev = existing.resolve;
+      existing.resolve = (approved: boolean) => { prev(approved); onResolve(approved); };
+      rlog('approval', `Coalesced duplicate approval for ${key} → ${existingId}`);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      const pending = pendingApprovals.get(req.id);
+      if (pending) {
+        pendingApprovals.delete(req.id);
+        inFlightApprovalKey.delete(key);
+        pending.resolve(false); // auto-deny
+      }
+    }, req.timeoutSeconds * 1000);
+
+    pendingApprovals.set(req.id, {
+      key,
+      timeout,
+      resolve: (approved: boolean) => {
+        clearTimeout(timeout);
+        pendingApprovals.delete(req.id);
+        if (inFlightApprovalKey.get(key) === req.id) inFlightApprovalKey.delete(key);
+        onResolve(approved);
+      },
+    });
+    inFlightApprovalKey.set(key, req.id);
+
+    // Broadcast to the phone (live modal) + push notification (backgrounded).
+    broadcastToMobile(req);
+    void sendPush({
+      type: 'approval_request',
+      toolName: req.toolName,
+      command: req.command?.substring(0, 200),
+      requestId: req.id,
+    });
+  }
+
+  function resolveApproval(requestId: string, approved: boolean): boolean {
+    const pending = pendingApprovals.get(requestId);
+    if (!pending) return false;
+    pending.resolve(approved);
+    return true;
+  }
+
+  function handleExtensionMessage(msg: KiroMessage, fromWs?: WebSocket.WebSocket) {
     if (msg.type === 'approval_request') {
       const req = msg as ApprovalRequestMessage;
-      broadcastToMobile(req);
-      const timer = setTimeout(() => {
-        const pending = pendingApprovals.get(req.id);
-        if (pending) {
-          pendingApprovals.delete(req.id);
-          pending.resolve(false);
-          sendToExtension({
-            type: 'approval_response',
-            id: randomUUID(),
-            timestamp: Date.now(),
-            requestId: req.id,
-            approved: false,
-            note: 'Auto-denied: timeout',
-          } as ApprovalResponseMessage);
-        }
-      }, req.timeoutSeconds * 1000);
-
-      pendingApprovals.set(req.id, {
-        resolve: (_approved: boolean) => {
-          clearTimeout(timer);
-          pendingApprovals.delete(req.id);
-        },
-        timeout: timer,
+      // Route the phone's decision back to the extension that asked.
+      registerApproval(req, (approved) => {
+        sendToExtension({
+          type: 'approval_response',
+          id: randomUUID(),
+          timestamp: Date.now(),
+          requestId: req.id,
+          approved,
+          note: undefined,
+        } as ApprovalResponseMessage);
       });
+    } else if (msg.type === 'status_update') {
+      // Track per-window state and broadcast the aggregate (most active wins).
+      if (fromWs) {
+        extensionState.set(fromWs, (msg as { agentState: 'idle' | 'running' | 'waiting_approval' }).agentState);
+      }
+      recomputeAggregateStatus(msg);
     } else {
       broadcastToMobile(msg);
     }
@@ -404,19 +543,17 @@ export function createServer(sessionManager: SessionManager) {
   function handleMobileMessage(msg: KiroMessage) {
     if (msg.type === 'approval_response') {
       const response = msg as ApprovalResponseMessage;
-      const pending = pendingApprovals.get(response.requestId);
-      if (pending) {
-        clearTimeout(pending.timeout);
-        pendingApprovals.delete(response.requestId);
-        pending.resolve(response.approved);
-      }
-      sendToExtension(response);
+      const handled = resolveApproval(response.requestId, response.approved);
+      // Fallback: if we had no pending record (e.g. already timed out), still
+      // forward so an extension waiting on its own local timeout can settle.
+      if (!handled) sendToExtension(response);
     } else if (
       msg.type === 'send_instruction' ||
       msg.type === 'send_to_session' ||
       msg.type === 'request_session_history'
     ) {
-      sendToExtension(msg);
+      // Route to a single window so the action isn't duplicated across windows.
+      sendToPrimaryExtension(msg);
     } else if (msg.type === 'ping') {
       broadcastToMobile({ type: 'pong', id: (msg as { id: string }).id, timestamp: Date.now() } as KiroMessage);
     }
@@ -434,23 +571,18 @@ export function createServer(sessionManager: SessionManager) {
       return;
     }
 
-    const requestId = randomUUID();
     const approvalMsg: ApprovalRequestMessage = {
       type: 'approval_request',
-      id: requestId,
+      id: randomUUID(),
       timestamp: Date.now(),
       command: JSON.stringify(payload.tool_input ?? {}),
       toolName: payload.tool_name ?? 'unknown',
-      timeoutSeconds: 60,
+      timeoutSeconds: APPROVAL_TIMEOUT_SEC,
     };
-    broadcastToMobile(approvalMsg);
 
+    // Same unified path (broadcast + push + dedup + timeout) as WS approvals.
     const approved = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        pendingApprovals.delete(requestId);
-        resolve(false);
-      }, 60_000);
-      pendingApprovals.set(requestId, { resolve, timeout: timer });
+      registerApproval(approvalMsg, resolve);
     });
 
     res.json({

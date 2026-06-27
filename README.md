@@ -15,6 +15,7 @@ that works over WiFi or anywhere via Cloudflare Tunnel.
 - **Tool approval** — approve or deny tool calls with a tap, with countdown timer
 - **Supervised mode** — accept or reject file changes when Kiro is in supervised mode
 - **Agent status** — see whether Kiro is idle, running, or waiting for approval
+- **Background push** — get a push notification when Kiro needs approval, even with the app closed (over the HTTPS tunnel)
 - **Session browser** — browse and search all past chat sessions, sorted by most recently active
 - **Remote access** — Cloudflare Tunnel gives you a public HTTPS URL so you can connect from any network, no account needed
 - **PWA** — installable on Android/iOS home screen for a native feel
@@ -101,6 +102,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 | `kiroRemote.relayPort` | `3737` | Local port for the relay server |
 | `kiroRemote.autoStart` | `false` | Start relay automatically when Kiro opens |
 | `kiroRemote.approvalTimeoutSeconds` | `60` | Seconds before a pending approval auto-denies |
+| `kiroRemote.sessionTimeoutMinutes` | `60` | Minutes a session/QR token stays valid |
+| `kiroRemote.preventSleep` | `true` | Keep your Mac awake (via `caffeinate`) while a session is active |
 
 ## Optional: Install Hooks
 
@@ -128,7 +131,7 @@ The hooks authenticate to the relay using the token from `~/.kiro-remote/token`.
 
 ## Tips
 
-- Run `caffeinate -i` to prevent your Mac from sleeping during a long session
+- Run `caffeinate -i` to prevent your Mac from sleeping during a long session (this is automatic while a session is active unless you disable `kiroRemote.preventSleep`)
 - Tap the status dot **3 times** in the mobile app to open the on-screen debug log
 - The tunnel URL changes on every session restart; the local WiFi URL is always `http://<ip>:3737/?token=<token>`
 - The relay log is at `~/.kiro-remote/relay.log` — useful for diagnosing connection issues

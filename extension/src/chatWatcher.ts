@@ -33,7 +33,8 @@ export interface ChatMessage {
 
 export class ChatWatcher {
   private watchers: fs.FSWatcher[] = [];
-  private sentMessageIds = new Set<string>();
+  /** dedup key (msgId) -> last text sent, so growing assistant text re-sends. */
+  private sentMessageIds = new Map<string, string>();
   private workspacePath: string;
   private workspaceKey: string;
   private sessionsDir: string;
@@ -118,8 +119,8 @@ export class ChatWatcher {
         const role = (msg['role'] as string) ?? 'user';
 
         let text: string;
+        const execId = e['executionId'] as string | undefined;
         if (role === 'assistant') {
-          const execId = e['executionId'] as string | undefined;
           const realResponse = execId ? getExecutionResponse(execId) : undefined;
           text = realResponse ?? extractTextStatic(msg['content']);
         } else {
@@ -127,8 +128,13 @@ export class ChatWatcher {
         }
         if (!text.trim()) continue;
 
+        // Stable per-execution id for assistant messages (matches ExecutionWatcher).
+        const msgId: string = (role === 'assistant' && execId)
+          ? `exec-${execId}`
+          : ((msg['id'] as string) ?? `${sessionId}-${idx}`);
+
         relay.sendChatMessage({
-          id: (msg['id'] as string) ?? `${sessionId}-${idx}`,
+          id: msgId,
           role: role as 'user' | 'assistant',
           text,
           timestamp: baseTs + idx,
@@ -191,24 +197,32 @@ export class ChatWatcher {
         if (!msg) continue;
 
         const role = (msg['role'] as string) ?? 'user';
-        // Use the message's own id as the dedup key — it's unique per message.
-        const msgId: string = (msg['id'] as string) ?? `${sessionId}-${role}-${JSON.stringify(msg).length}`;
-
-        if (this.sentMessageIds.has(msgId)) continue;
-        this.sentMessageIds.add(msgId);
 
         // For assistant messages: look up the real response from the execution log.
         // The session only stores "On it." as the initial acknowledgment;
         // the actual response is in the execution file.
         let text: string;
+        const execId = e['executionId'] as string | undefined;
         if (role === 'assistant') {
-          const execId = e['executionId'] as string | undefined;
           const realResponse = execId ? getExecutionResponse(execId) : undefined;
           text = realResponse ?? extractTextStatic(msg['content']);
         } else {
           text = extractTextStatic(msg['content']);
         }
         if (!text.trim()) continue;
+
+        // Use a stable per-execution id for assistant messages so this history
+        // poll and the live ExecutionWatcher stream converge on ONE bubble
+        // (the watcher streams the same `exec-<id>`). Fall back to the message
+        // id for user messages / entries without an executionId.
+        const msgId: string = (role === 'assistant' && execId)
+          ? `exec-${execId}`
+          : ((msg['id'] as string) ?? `${sessionId}-${role}-${JSON.stringify(msg).length}`);
+
+        // Dedup: skip only if we've already sent this exact text for this id.
+        // (Assistant text can grow as the execution completes after streaming.)
+        if (this.sentMessageIds.get(msgId) === text) continue;
+        this.sentMessageIds.set(msgId, text);
 
         const chatMsg: ChatMessage = {
           id: msgId,

@@ -20,6 +20,7 @@ let chatWatchers: ChatWatcher[] = [];
 let kiroSessionManager: KiroSessionManager | null = null;
 let statusBar: StatusBarController | null = null;
 let relayProcess: cp.ChildProcess | null = null;
+let caffeinateProcess: cp.ChildProcess | null = null;
 let output: vscode.OutputChannel | null = null;
 let currentToken: string | null = null;
 
@@ -110,6 +111,8 @@ async function startSession(context: vscode.ExtensionContext) {
 
   const config = vscode.workspace.getConfiguration('kiroRemote');
   const port = config.get<number>('relayPort', 3737);
+  const approvalTimeout = config.get<number>('approvalTimeoutSeconds', 60);
+  const sessionTimeoutMin = config.get<number>('sessionTimeoutMinutes', 60);
 
   const serverPath = context.asAbsolutePath(path.join('server', 'dist', 'index.js'));
   if (!fs.existsSync(serverPath)) {
@@ -123,17 +126,23 @@ async function startSession(context: vscode.ExtensionContext) {
   // The EXTENSION owns the token (persisted to a file so it survives reinstalls).
   currentToken = getPersistentToken(context);
   const localIp = getLocalIP();
+  const buildId = getBuildId(context);
 
   // Check if a relay is ALREADY running on this port.
   // With multiple Kiro windows open, we must NOT kill each other's relay.
-  // If a healthy relay with OUR token is already up, just reuse it.
+  // Reuse only if it has OUR token AND is the SAME build — otherwise it's a
+  // stale relay (e.g. left over after an extension update) serving an old UI
+  // and old server code, so we must replace it.
   const existing = await probeServer(port);
-  if (existing.alive && existing.token === currentToken) {
-    log(`A relay with our token is already running on ${port} — reusing it (not spawning)`);
+  if (existing.alive && existing.token === currentToken && existing.build === buildId) {
+    log(`A relay with our token+build is already running on ${port} — reusing it (not spawning)`);
     // Don't own the process (another window started it); leave relayProcess null.
   } else {
     if (existing.alive) {
-      log(`A relay with a DIFFERENT token (${existing.token}) is on ${port} — replacing it`);
+      const why = existing.token !== currentToken
+        ? `different token (${existing.token})`
+        : `different build (${existing.build} → ${buildId})`;
+      log(`A relay with a ${why} is on ${port} — replacing it`);
       try { await killStaleServer(port); }
       catch (e) {
         log(`ERROR: ${e}`);
@@ -142,7 +151,7 @@ async function startSession(context: vscode.ExtensionContext) {
       }
     }
 
-    log(`Starting relay on port ${port} with token ${currentToken}`);
+    log(`Starting relay on port ${port} with token ${currentToken} (build ${buildId})`);
     output?.show(true);
 
     relayProcess = cp.spawn(
@@ -155,6 +164,9 @@ async function startSession(context: vscode.ExtensionContext) {
           PORT: String(port),
           KIRO_REMOTE_TOKEN: currentToken,
           KIRO_REMOTE_LOCAL_IP: localIp,
+          KIRO_REMOTE_APPROVAL_TIMEOUT: String(approvalTimeout),
+          KIRO_REMOTE_SESSION_TIMEOUT: String(sessionTimeoutMin * 60),
+          KIRO_REMOTE_BUILD: buildId,
         },
         detached: false,
       }
@@ -253,6 +265,9 @@ async function startSession(context: vscode.ExtensionContext) {
 
   statusBar?.setConnected(port);
 
+  // Keep the Mac awake while the session is active so the relay stays reachable.
+  startCaffeinate();
+
   const localUrl = `http://${localIp}:${port}/?token=${currentToken}`;
   log(`Local URL: ${localUrl}`);
 
@@ -266,6 +281,32 @@ async function startSession(context: vscode.ExtensionContext) {
   } else if (action === 'Show Logs') {
     output?.show();
   }
+}
+
+/** Keep macOS awake while the session runs (system + idle sleep). */
+function startCaffeinate() {
+  const config = vscode.workspace.getConfiguration('kiroRemote');
+  if (!config.get<boolean>('preventSleep', true)) return;
+  if (process.platform !== 'darwin') return; // caffeinate is macOS-only
+  if (caffeinateProcess) return;             // already running
+  try {
+    // -i: prevent idle system sleep, -s: prevent system sleep (on AC),
+    // -m: prevent disk idle sleep. The process lives for the whole session.
+    caffeinateProcess = cp.spawn('caffeinate', ['-i', '-s', '-m'], { detached: false });
+    caffeinateProcess.on('error', (err) => log(`caffeinate error: ${err.message}`));
+    caffeinateProcess.on('exit', () => { caffeinateProcess = null; });
+    log(`Sleep prevention ON (caffeinate pid ${caffeinateProcess.pid})`);
+  } catch (e) {
+    log(`Could not start caffeinate: ${e}`);
+  }
+}
+
+/** Allow macOS to sleep again. */
+function stopCaffeinate() {
+  if (!caffeinateProcess) return;
+  try { caffeinateProcess.kill(); log('Sleep prevention OFF'); }
+  catch { /* already gone */ }
+  caffeinateProcess = null;
 }
 
 /** Kill any process bound to the port and WAIT until the port is actually free. */
@@ -312,6 +353,7 @@ async function killStaleServer(port: number): Promise<void> {
 
 async function stopSession() {
   log('Stopping session…');
+  stopCaffeinate();
   statusPoller?.stop();
   statusPoller = null;
   executionWatcher?.stop();
@@ -344,27 +386,74 @@ async function stopSession() {
   vscode.window.showInformationMessage('Kiro Remote Control stopped.');
 }
 
-async function showQR(context: vscode.ExtensionContext) {
-  const localQrPath = path.join(os.homedir(), '.kiro-remote', 'qr.png');
-  const tunnelQrPath = path.join(os.homedir(), '.kiro-remote', 'qr-tunnel.png');
+/** Build a webview URI for a QR PNG with a cache-busting query so the webview
+ *  never shows a stale cached image when the file content changes per session. */
+function withCacheBust(panel: vscode.WebviewPanel, filePath: string): vscode.Uri {
+  let v = Date.now();
+  try { v = Math.floor(fs.statSync(filePath).mtimeMs); } catch { /* use now */ }
+  return panel.webview.asWebviewUri(vscode.Uri.file(filePath)).with({ query: `v=${v}` });
+}
 
-  if (!fs.existsSync(localQrPath)) {
+async function showQR(context: vscode.ExtensionContext) {
+  const dir = path.join(os.homedir(), '.kiro-remote');
+
+  if (!currentToken) {
     vscode.window.showWarningMessage('No active session. Start one first.');
     return;
   }
 
-  // Poll the relay for the current tunnel URL (it may arrive after the QR opens)
+  const config = vscode.workspace.getConfiguration('kiroRemote');
+  const port = config.get<number>('relayPort', 3737);
+
+  // Read the LIVE state from the relay so the QR always matches what's actually
+  // serving right now (token + current tunnel URL), independent of any PNG that
+  // may be on disk from an earlier run.
   let tunnelUrl: string | null = null;
-  if (currentToken) {
-    try {
-      const config = vscode.workspace.getConfiguration('kiroRemote');
-      const port = config.get<number>('relayPort', 3737);
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (res.ok) {
-        const data = await res.json() as { tunnelUrl?: string | null };
-        tunnelUrl = data.tunnelUrl ?? null;
+  let token = currentToken;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
+    if (res.ok) {
+      const data = await res.json() as { tunnelUrl?: string | null; token?: string | null };
+      tunnelUrl = data.tunnelUrl ?? null;
+      if (data.token) token = data.token;
+    }
+  } catch { /* relay not running */ }
+
+  const localUrl = `http://${getLocalIP()}:${port}/?token=${token}`;
+
+  // Generate the QR PNGs FRESH from the live URLs, into per-invocation unique
+  // files. This is the only way to guarantee the displayed QR matches the live
+  // URL — it removes any dependence on a stale PNG or the webview image cache.
+  let qrcodeLib: { toFile: (p: string, text: string, opts: object) => Promise<void> };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    qrcodeLib = require(context.asAbsolutePath(path.join('server', 'node_modules', 'qrcode')));
+  } catch (e) {
+    log(`Could not load qrcode lib: ${e}`);
+    vscode.window.showErrorMessage('Could not generate QR code (qrcode module missing).');
+    return;
+  }
+
+  // Clean up QR files from previous invocations to avoid clutter.
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (/^qr-(local|tunnel)-\d+\.png$/.test(f)) {
+        try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
       }
-    } catch { /* relay not running */ }
+    }
+  } catch { /* ignore */ }
+
+  const stamp = Date.now();
+  const qrOpts = { type: 'png', width: 400, margin: 2, color: { dark: '#1a1a2e', light: '#ffffff' } };
+  const localQrPath = path.join(dir, `qr-local-${stamp}.png`);
+  const tunnelQrPath = path.join(dir, `qr-tunnel-${stamp}.png`);
+
+  try { await qrcodeLib.toFile(localQrPath, localUrl, qrOpts); }
+  catch (e) { log(`local QR gen failed: ${e}`); }
+
+  if (tunnelUrl) {
+    try { await qrcodeLib.toFile(tunnelQrPath, tunnelUrl, qrOpts); }
+    catch (e) { log(`tunnel QR gen failed: ${e}`); }
   }
 
   const panel = vscode.window.createWebviewPanel(
@@ -373,16 +462,14 @@ async function showQR(context: vscode.ExtensionContext) {
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.file(path.join(os.homedir(), '.kiro-remote'))],
+      localResourceRoots: [vscode.Uri.file(dir)],
     }
   );
 
-  const localQrUri = panel.webview.asWebviewUri(vscode.Uri.file(localQrPath));
-  const tunnelQrUri = fs.existsSync(tunnelQrPath)
-    ? panel.webview.asWebviewUri(vscode.Uri.file(tunnelQrPath))
+  const localQrUri = fs.existsSync(localQrPath) ? withCacheBust(panel, localQrPath) : null;
+  const tunnelQrUri = (tunnelUrl && fs.existsSync(tunnelQrPath))
+    ? withCacheBust(panel, tunnelQrPath)
     : null;
-
-  const localUrl = `http://${getLocalIP()}:${vscode.workspace.getConfiguration('kiroRemote').get<number>('relayPort', 3737)}/?token=${currentToken ?? ''}`;
 
   panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
@@ -409,7 +496,7 @@ async function showQR(context: vscode.ExtensionContext) {
 
   <div class="qr-section">
     <div class="qr-label local">📶 Local WiFi</div>
-    <img src="${localQrUri}" alt="Local QR Code" />
+    ${localQrUri ? `<img src="${localQrUri}" alt="Local QR Code" />` : `<div class="spinner">Could not render QR</div>`}
     <div class="url">${localUrl}</div>
   </div>
 
@@ -446,6 +533,10 @@ async function installHooks(context: vscode.ExtensionContext) {
     'task-complete.sh',
   ];
 
+  // The hook scripts ship with the default port hardcoded. Inject the actually
+  // configured port so hooks keep working when kiroRemote.relayPort is changed.
+  const port = vscode.workspace.getConfiguration('kiroRemote').get<number>('relayPort', 3737);
+
   for (const file of hookFiles) {
     const src = path.join(hookSrcDir, file);
     const dest = path.join(hooksDir, file);
@@ -453,7 +544,9 @@ async function installHooks(context: vscode.ExtensionContext) {
       console.warn(`[kiro-remote] Hook script not found: ${src}`);
       continue;
     }
-    fs.copyFileSync(src, dest);
+    const script = fs.readFileSync(src, 'utf8')
+      .replace(/RELAY_URL="http:\/\/localhost:\d+"/, `RELAY_URL="http://localhost:${port}"`);
+    fs.writeFileSync(dest, script);
     fs.chmodSync(dest, '755');
   }
 
@@ -490,30 +583,54 @@ async function installHooks(context: vscode.ExtensionContext) {
   );
 }
 
-/** Probe the relay /health endpoint to learn if it's alive and what token it has. */
-async function probeServer(port: number): Promise<{ alive: boolean; token: string | null }> {
+/** Probe the relay /health endpoint to learn if it's alive and what token/build it has. */
+async function probeServer(port: number): Promise<{ alive: boolean; token: string | null; build: string | null }> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
-    if (!res.ok) return { alive: true, token: null };
-    const data = await res.json() as { token?: string | null };
-    return { alive: true, token: data.token ?? null };
+    if (!res.ok) return { alive: true, token: null, build: null };
+    const data = await res.json() as { token?: string | null; build?: string | null };
+    return { alive: true, token: data.token ?? null, build: data.build ?? null };
   } catch {
-    return { alive: false, token: null };
+    return { alive: false, token: null, build: null };
+  }
+}
+
+/**
+ * A build fingerprint for the bundled relay server. Derived from the bundle's
+ * mtime so that a reinstalled/updated extension produces a different id and
+ * therefore REPLACES any stale relay still running from the previous build.
+ */
+function getBuildId(context: vscode.ExtensionContext): string {
+  try {
+    const p = context.asAbsolutePath(path.join('server', 'dist', 'index.js'));
+    return String(Math.floor(fs.statSync(p).mtimeMs));
+  } catch {
+    return '0';
   }
 }
 
 /**
  * Wait until the relay server responds AND confirms it's running OUR token.
  * This guarantees we're talking to the server we just spawned, not a stale one.
+ *
+ * Uses the loopback-only /health endpoint (NOT /session/:token): /session is
+ * rate-limited to 30 req/min per IP, and polling it every 250ms for up to 12s
+ * can trip that limiter and produce a false "server not ready" timeout even
+ * though the server is up. /health is exempt from rate limiting for loopback.
  */
 async function waitForServer(port: number, token: string, maxWaitMs = 12000): Promise<void> {
   const start = Date.now();
   let lastErr = 'timeout';
   while (Date.now() - start < maxWaitMs) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/session/${token}`);
-      if (res.ok) return;
-      lastErr = `HTTP ${res.status} (token not yet valid)`;
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      if (res.ok) {
+        const data = await res.json() as { token?: string | null };
+        if (data.token === token) return;
+        lastErr = `token mismatch (got ${data.token ?? 'null'})`;
+      } else {
+        lastErr = `HTTP ${res.status}`;
+      }
     } catch (e) {
       lastErr = String(e);
     }

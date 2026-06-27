@@ -1,186 +1,170 @@
 /**
- * ExecutionWatcher — watches the active Kiro execution file in real-time
- * and streams `say` actions to the phone as they're emitted.
+ * ExecutionWatcher — streams Kiro's live agent output to the phone in real time.
  *
- * This is how we get "streaming" responses: Kiro appends `say` actions to
- * the execution JSON file as the agent runs, each with an `emittedAt`
- * timestamp. We watch the file with fs.watch + polling, and forward any
- * new `say` actions we haven't sent yet.
+ * Kiro persists each run to a JSON execution file and rewrites it (atomically,
+ * via a ".<name>.tmp" + rename) as the agent works. While the model streams,
+ * the `reasoning` (thinking) and `say` (response) actions are written with
+ * `actionState: "Running"` and their `output.message` GROWS token by token.
  *
- * Additionally, this watcher detects supervised-mode diff reviews
- * (executions with pending file changes) and sends them to the phone
- * as a special `diff_review` approval request.
+ * We poll the recently-modified execution files frequently and forward:
+ *   - reasoning → a live "thinking" bubble  (id: reason-<executionId>)
+ *   - say       → the assistant response    (id: exec-<executionId>)
+ * Both are re-sent as their text grows; the phone updates the bubble in place.
+ *
+ * Detection is driven purely by file mtime (NOT kiroAgent.* commands, which
+ * aren't always available). fs.watch is intentionally not used — it misses the
+ * atomic-rename writes — fast polling is the reliable path.
+ *
+ * Also detects supervised-mode diff reviews and forwards them as approvals.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as vscode from 'vscode';
 import { RelayClient } from './relayClient';
 import { KiroMessage } from './types';
 import { randomUUID } from 'crypto';
-
-const KIRO_AGENT_BASE = path.join(
-  os.homedir(),
-  'Library', 'Application Support', 'Kiro', 'User',
-  'globalStorage', 'kiro.kiroagent'
-);
-const EXEC_SUBDIR = '414d1636299d2b9e4ce7e17fb11f63e9';
+import { agentState } from './agentState';
+import { findRecentExecutionFiles, readExecutionFile } from './executionFiles';
 
 function log(msg: string) {
   console.log(`[kiro-remote:execwatcher ${new Date().toISOString().substring(11, 23)}] ${msg}`);
 }
 
-interface SayAction {
-  actionType: 'say';
-  actionId: string;
-  executionId: string;
-  chatSessionId?: string;
-  emittedAt: number;
-  output: { message: string };
-}
-
-interface ExecutionFile {
-  executionId: string;
-  chatSessionId?: string;
-  actions: Array<{ actionType: string; actionId?: string; emittedAt?: number; [k: string]: unknown }>;
-}
-
 export class ExecutionWatcher {
-  private watcher: fs.FSWatcher | null = null;
   private pollInterval: NodeJS.Timeout | null = null;
-  /** emittedAt of the last say action we've already streamed */
-  private lastStreamedAt = 0;
-  private currentFile: string | null = null;
+  /** message id -> last text streamed, so we re-send only on change. */
+  private sentText = new Map<string, string>();
+  /** file path -> last mtime we processed, to skip unchanged files. */
+  private fileMtimes = new Map<string, number>();
+  /** How recently a file must have been written to be considered "live". */
+  private readonly liveWindowMs = 8000;
+  private readonly pollMs = 300;
+
   private pendingDiffIds = new Set<string>();
+  private resolvedDiffAt = new Map<string, number>();
+  private readonly diffCooldownMs = 8000;
 
   constructor(private readonly relay: RelayClient) {}
 
   start() {
-    // Poll for the currently active execution file every 1.5s
-    this.pollInterval = setInterval(() => this.checkActiveExecution(), 1500);
+    this.pollInterval = setInterval(() => this.tick(), this.pollMs);
+    this.tick();
     log('ExecutionWatcher started');
   }
 
   stop() {
     if (this.pollInterval) { clearInterval(this.pollInterval); this.pollInterval = null; }
-    if (this.watcher) { this.watcher.close(); this.watcher = null; }
     log('ExecutionWatcher stopped');
+    this.cleanupCaches();
   }
 
-  private async checkActiveExecution() {
-    try {
-      // Get the currently running executions from Kiro
-      const executions = await vscode.commands.executeCommand(
-        'kiroAgent.executions.getExecutions'
-      ) as Array<{ id?: string; executionId?: string; chatSessionId?: string; status?: string; state?: string }> | undefined;
-
-      if (!executions || !Array.isArray(executions) || executions.length === 0) return;
-
-      // Find active (running) execution
-      const active = executions.find(e => {
-        const s = (e.status ?? e.state ?? '').toLowerCase();
-        return s.includes('run') || s.includes('active') || s.includes('progress');
-      }) ?? executions[executions.length - 1];
-
-      if (!active) return;
-
-      const execId = active.executionId ?? active.id;
-      if (!execId) return;
-
-      // Find the execution file on disk
-      const file = this.findExecutionFile(execId);
-      if (!file) return;
-
-      if (file !== this.currentFile) {
-        log(`Watching new execution file: ${path.basename(file)} (${execId})`);
-        this.currentFile = file;
-        this.lastStreamedAt = 0;
-        if (this.watcher) { this.watcher.close(); this.watcher = null; }
-        try {
-          this.watcher = fs.watch(file, () => this.streamNewSayActions(file));
-        } catch { /* fs.watch not available for this file */ }
-      }
-
-      this.streamNewSayActions(file);
-      this.checkForDiffReview(execId);
-    } catch { /* kiroAgent API not available */ }
+  private tick() {
+    const recent = findRecentExecutionFiles(this.liveWindowMs);
+    for (const { path: file, mtimeMs } of recent) {
+      // Skip files we've already processed at this mtime.
+      if (this.fileMtimes.get(file) === mtimeMs) continue;
+      this.fileMtimes.set(file, mtimeMs);
+      this.streamFromFile(file);
+    }
+    // Bound the caches so they don't grow unbounded over a long session.
+    if (this.fileMtimes.size > 200 || this.sentText.size > 400) this.cleanupCaches();
   }
 
-  private findExecutionFile(executionId: string): string | null {
-    let dirs: string[];
-    try { dirs = fs.readdirSync(KIRO_AGENT_BASE); }
-    catch { return null; }
+  private cleanupCaches() {
+    // Keep only files still within (a generous multiple of) the live window.
+    const cutoff = Date.now() - this.liveWindowMs * 10;
+    for (const [f, m] of this.fileMtimes) {
+      if (m < cutoff) this.fileMtimes.delete(f);
+    }
+    if (this.sentText.size > 400) this.sentText.clear();
+  }
 
-    for (const hashDir of dirs) {
-      const execDir = path.join(KIRO_AGENT_BASE, hashDir, EXEC_SUBDIR);
-      if (!fs.existsSync(execDir)) continue;
+  private streamFromFile(file: string) {
+    const data = readExecutionFile(file);
+    if (!data || !data.executionId) return;
+    const actions = data.actions ?? [];
+    const sessionId = data.chatSessionId ?? '';
 
-      // Look for a file containing this executionId
-      // Files are UUIDs — we scan them; they're small enough
-      let files: string[];
-      try { files = fs.readdirSync(execDir); }
-      catch { continue; }
+    // ── Thinking: the most recent reasoning block, streamed as it grows ──
+    let thinking: string | undefined;
+    let thinkingAt = 0;
+    // ── Response: concatenation of all `say` messages, in order ──
+    const sayParts: string[] = [];
+    let lastSayAt = 0;
 
-      for (const file of files) {
-        const fpath = path.join(execDir, file);
-        try {
-          const raw = fs.readFileSync(fpath, 'utf8');
-          if (raw.includes(executionId)) {
-            const data = JSON.parse(raw) as ExecutionFile;
-            if (data.executionId === executionId) return fpath;
-          }
-        } catch { /* skip */ }
+    for (const a of actions) {
+      const msg = a.output?.message?.trim();
+      if (!msg) continue;
+      if (a.actionType === 'reasoning') {
+        thinking = msg;                         // last reasoning wins
+        thinkingAt = a.emittedAt ?? thinkingAt;
+      } else if (a.actionType === 'say') {
+        sayParts.push(msg);
+        lastSayAt = a.emittedAt ?? lastSayAt;
       }
     }
-    return null;
-  }
 
-  private streamNewSayActions(file: string) {
-    try {
-      const data = JSON.parse(fs.readFileSync(file, 'utf8')) as ExecutionFile;
-      const actions = data.actions ?? [];
+    const response = sayParts.join('\n\n').trim();
 
-      for (const action of actions) {
-        if (action.actionType !== 'say') continue;
-        const say = action as unknown as SayAction;
-        const emittedAt = say.emittedAt ?? 0;
-        if (emittedAt <= this.lastStreamedAt) continue;
-
-        const text = say.output?.message?.trim();
-        if (!text) continue;
-
-        log(`Streaming say action emittedAt=${emittedAt}: "${text.substring(0, 60)}..."`);
-
-        const msg: KiroMessage = {
-          type: 'chat_message' as any,
-          id: say.actionId ?? randomUUID(),
-          timestamp: emittedAt,
+    // Send the response bubble (id matches ChatWatcher's `exec-<id>` so live +
+    // history converge on one bubble).
+    if (response) {
+      const id = `exec-${data.executionId}`;
+      if (this.sentText.get(id) !== response) {
+        this.sentText.set(id, response);
+        this.relay.send({
+          type: 'chat_message',
+          id,
+          timestamp: lastSayAt || Date.now(),
           role: 'assistant',
-          text,
-          sessionId: data.chatSessionId ?? say.chatSessionId ?? '',
+          text: response,
+          sessionId,
           sessionTitle: 'Kiro',
-        } as any;
-
-        this.relay.send(msg);
-        this.lastStreamedAt = emittedAt;
+        } as KiroMessage);
       }
-    } catch { /* file being written, retry on next tick */ }
+    }
+
+    // Send the live "thinking" bubble. Only while there's no final response yet
+    // OR while it keeps changing — it appears, streams, then the response shows.
+    if (thinking) {
+      const id = `reason-${data.executionId}`;
+      if (this.sentText.get(id) !== thinking) {
+        this.sentText.set(id, thinking);
+        this.relay.send({
+          type: 'chat_message',
+          id,
+          timestamp: thinkingAt || Date.now(),
+          role: 'assistant',
+          text: thinking,
+          sessionId,
+          sessionTitle: 'Kiro',
+          thinking: true,
+        } as KiroMessage);
+      }
+    }
+
+    void this.checkForDiffReview(data.executionId);
   }
 
   private async checkForDiffReview(executionId: string) {
     if (this.pendingDiffIds.has(executionId)) return;
 
+    // Cooldown: after we resolve a diff review, Kiro may still report the
+    // (now accepted/rejected) changes for a short window. Don't re-fire during
+    // that window or the phone gets a duplicate diff approval.
+    const resolvedAt = this.resolvedDiffAt.get(executionId);
+    if (resolvedAt && Date.now() - resolvedAt < this.diffCooldownMs) return;
+
     try {
-      // Check if this execution has pending changes awaiting approval (supervised mode)
       const changes = await vscode.commands.executeCommand(
         'kiroAgent.execution.getExecutionChanges', executionId
       ) as Array<{ filePath?: string; changeType?: string }> | undefined;
 
       if (!changes || changes.length === 0) return;
 
-      // There are pending file changes — send a special approval request to phone
       this.pendingDiffIds.add(executionId);
+      agentState.addPendingApproval(`diff:${executionId}`);
       log(`Supervised mode: ${changes.length} pending file changes for execution ${executionId}`);
 
       const fileList = changes
@@ -196,9 +180,10 @@ export class ExecutionWatcher {
         toolName: 'file_changes',
         context: `Supervised mode: Kiro wants to write ${changes.length} file${changes.length > 1 ? 's' : ''}. Review in Kiro IDE or approve here.`,
         timeoutSeconds: 120,
-      } as any;
+      } as KiroMessage;
 
-      const approved = await this.relay.sendApprovalRequest(approvalMsg as any);
+      const approved = (await this.relay.sendApprovalRequest(approvalMsg as any)).approved;
+      agentState.removePendingApproval(`diff:${executionId}`);
 
       if (approved) {
         await vscode.commands.executeCommand('kiroAgent.execution.runOrAcceptAll', executionId);
@@ -208,6 +193,7 @@ export class ExecutionWatcher {
         log(`Rejected ${changes.length} file changes`);
       }
 
+      this.resolvedDiffAt.set(executionId, Date.now());
       this.pendingDiffIds.delete(executionId);
     } catch { /* command not available — supervised mode may not be active */ }
   }

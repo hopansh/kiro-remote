@@ -42,12 +42,14 @@ export interface ApprovalRequestMessage extends BaseMessage {
   toolName: string;        // e.g. "shell", "write", "read"
   context?: string;        // surrounding context if available
   timeoutSeconds: number;  // how long phone has to respond before auto-deny
+  options?: Array<{ id: string; label: string }>; // multi-choice question options
 }
 
 export interface ApprovalResponseMessage extends BaseMessage {
   type: 'approval_response';
   requestId: string;       // matches the ApprovalRequestMessage.id
   approved: boolean;
+  answer?: string;         // chosen option label for multi-choice questions
   note?: string;           // optional message from user
 }
 
@@ -121,6 +123,8 @@ export interface ChatMessageMessage extends BaseMessage {
   text: string;
   sessionId: string;
   sessionTitle: string;
+  /** true for live "thinking"/reasoning bubbles (rendered muted on the phone). */
+  thinking?: boolean;
 }
 
 export interface RequestRefreshMessage extends BaseMessage {
