@@ -7,27 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  build-extension:
-    name: Build Extension
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: extension/package-lock.json
-
-      - name: Install extension dependencies
-        run: npm install
-        working-directory: extension
-
-      - name: Compile extension
-        run: npm run compile
-        working-directory: extension
-
   build-relay-server:
     name: Build Relay Server
     runs-on: macos-latest
@@ -41,10 +20,71 @@ jobs:
           cache: 'npm'
           cache-dependency-path: relay-server/package-lock.json
 
+      - name: Install dependencies
+        run: npm install
+        working-directory: relay-server
+
+      - name: Build (TypeScript → dist/)
+        run: npm run build
+        working-directory: relay-server
+
+  build-extension:
+    name: Build Extension
+    runs-on: macos-latest
+    # Extension build triggers a relay-server build internally (sync-bundle.js),
+    # so we don't strictly need build-relay-server to finish first — but
+    # depending on it catches relay-side TypeScript errors in their own job.
+    needs: build-relay-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js (relay-server)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: relay-server/package-lock.json
+
       - name: Install relay-server dependencies
         run: npm install
         working-directory: relay-server
 
-      - name: Build relay server
+      - name: Set up Node.js (extension)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install extension dependencies
+        run: npm install
+        working-directory: extension
+
+      - name: Full build (compile + sync relay + mobile-ui into bundle)
         run: npm run build
-        working-directory: relay-server
+        working-directory: extension
+
+  validate-mobile-ui:
+    name: Validate Mobile UI JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax-check index.html script block
+        run: |
+          node -e "
+          const fs = require('fs');
+          const h = fs.readFileSync('mobile-ui/index.html', 'utf8');
+          const m = h.match(/<script>([\s\S]*?)<\/script>/);
+          if (!m) { console.error('No <script> block found'); process.exit(1); }
+          require('vm').compileFunction(m[1]);
+          console.log('index.html JS OK');
+          "
+
+      - name: Syntax-check sw.js
+        run: node -e "require('vm').compileFunction(require('fs').readFileSync('mobile-ui/sw.js','utf8')); console.log('sw.js OK');"
