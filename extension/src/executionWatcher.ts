@@ -45,6 +45,10 @@ export class ExecutionWatcher {
   private resolvedDiffAt = new Map<string, number>();
   private readonly diffCooldownMs = 8000;
 
+  private pendingActionIds = new Set<string>();
+  private resolvedActionAt = new Map<string, number>();
+  private readonly actionCooldownMs = 8000;
+
   constructor(private readonly relay: RelayClient) {}
 
   start() {
@@ -144,7 +148,59 @@ export class ExecutionWatcher {
       }
     }
 
+    // Check for any pending tool actions (other than userInput, which is handled by ApprovalWatcher)
+    const pendingActions = actions.filter(
+      (a: any) => a.actionState === 'PendingAction' && a.actionType !== 'userInput'
+    );
+    for (const action of pendingActions) {
+      if (action.actionId) {
+        void this.handlePendingAction(data.executionId, action);
+      }
+    }
+
     void this.checkForDiffReview(data.executionId);
+  }
+
+  private async handlePendingAction(executionId: string, action: any) {
+    const actionId = action.actionId;
+    if (this.pendingActionIds.has(actionId)) return;
+
+    const resolvedAt = this.resolvedActionAt.get(actionId);
+    if (resolvedAt && Date.now() - resolvedAt < this.actionCooldownMs) return;
+
+    this.pendingActionIds.add(actionId);
+    agentState.addPendingApproval(`action:${actionId}`);
+    log(`Pending action ${actionId} (${action.actionType}) in execution ${executionId}`);
+
+    const desc = getActionDescription(action);
+
+    const approvalMsg: KiroMessage = {
+      type: 'approval_request',
+      id: actionId, // Use actionId so the response can be matched
+      timestamp: Date.now(),
+      command: desc,
+      toolName: action.actionType,
+      context: `Kiro wants to run ${action.actionType}.`,
+      timeoutSeconds: 60,
+    } as KiroMessage;
+
+    try {
+      const approved = (await this.relay.sendApprovalRequest(approvalMsg as any)).approved;
+      agentState.removePendingApproval(`action:${actionId}`);
+
+      if (approved) {
+        await vscode.commands.executeCommand('kiroAgent.execution.runOrAcceptAll', executionId);
+        log(`Approved action ${actionId}`);
+      } else {
+        await vscode.commands.executeCommand('kiroAgent.execution.rejectAll', executionId);
+        log(`Rejected action ${actionId}`);
+      }
+    } catch (e) {
+      log(`Failed to handle pending action ${actionId}: ${e}`);
+    } finally {
+      this.resolvedActionAt.set(actionId, Date.now());
+      this.pendingActionIds.delete(actionId);
+    }
   }
 
   private async checkForDiffReview(executionId: string) {
@@ -197,4 +253,15 @@ export class ExecutionWatcher {
       this.pendingDiffIds.delete(executionId);
     } catch { /* command not available — supervised mode may not be active */ }
   }
+}
+
+function getActionDescription(action: any): string {
+  if (action.actionType === 'shell') {
+    return action.input?.command || JSON.stringify(action.input);
+  }
+  if (action.actionType === 'write' || action.actionType === 'replace' || action.actionType === 'create') {
+    const file = action.input?.file || action.input?.path || '';
+    return `Write/modify ${path.basename(file)}`;
+  }
+  return JSON.stringify(action.input || {});
 }

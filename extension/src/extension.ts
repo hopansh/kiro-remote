@@ -237,6 +237,14 @@ async function startSession(context: vscode.ExtensionContext) {
   kiroSessionManager = new KiroSessionManager(relayClient);
   kiroSessionManager.start();
 
+  // Automatically install/update hooks in the workspace on session start
+  try {
+    await installHooks(context);
+    log('Hooks automatically installed/updated in workspace');
+  } catch (e) {
+    log(`Failed to automatically install hooks: ${e}`);
+  }
+
   // When a phone connects, the relay asks us to refresh — resend sessions + history.
   relayClient.onRefreshRequest = () => {
     log('Relay requested refresh (phone connected) — resending session list + chat history');

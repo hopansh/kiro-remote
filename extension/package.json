@@ -73,7 +73,7 @@
         },
         "kiroRemote.sessionTimeoutMinutes": {
           "type": "number",
-          "default": 60,
+          "default": 240,
           "description": "Minutes a remote session stays valid before the QR/token expires"
         },
         "kiroRemote.preventSleep": {
