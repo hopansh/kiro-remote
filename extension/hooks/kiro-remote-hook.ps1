@@ -4,6 +4,7 @@ param(
 )
 
 $RelayUrl = 'http://localhost:3737'
+$RequestTimeoutSec = 70
 $TokenFile = Join-Path $env:USERPROFILE '.kiro-remote\token'
 
 # Hooks deliberately fail open when the relay is unavailable.
@@ -21,7 +22,7 @@ try {
     -Headers $Headers `
     -ContentType 'application/json' `
     -Body $Payload `
-    -TimeoutSec 70
+    -TimeoutSec $RequestTimeoutSec
 } catch {
   exit 0
 }

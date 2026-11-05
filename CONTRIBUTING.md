@@ -6,8 +6,8 @@ Thanks for your interest! Here's everything you need to get started.
 
 Kiro Remote Control currently supports **macOS and Windows**. It reads chat session and execution
 log files from `~/Library/Application Support/Kiro/...`, uses `caffeinate` on macOS for
-sleep prevention, and platform-specific tools for port management. Contributions that add
-Windows/Linux support are welcome.
+sleep prevention, and platform-specific tools for port management. Contributions that improve Windows support
+or add Linux support are welcome.
 
 ---
 

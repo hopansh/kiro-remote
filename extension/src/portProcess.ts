@@ -1,8 +1,14 @@
 import { execFile } from 'child_process';
 
 function run(command: string, args: string[]): Promise<string> {
-  return new Promise((resolve) => {
-    execFile(command, args, (_error, stdout) => resolve(stdout));
+  return new Promise((resolve, reject) => {
+    execFile(command, args, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr.trim() || error.message));
+        return;
+      }
+      resolve(stdout);
+    });
   });
 }
 
@@ -27,7 +33,7 @@ export async function killProcessesOnPort(port: number): Promise<number[]> {
     return killed;
   }
 
-  const output = await run('lsof', ['-ti', `tcp:${port}`]);
+  const output = await run('lsof', ['-ti', `tcp:${port}`]).catch(() => '');
   for (const value of output.split(/\r?\n/)) {
     const pid = Number(value.trim());
     if (!Number.isInteger(pid) || pid <= 0) continue;
@@ -39,6 +45,14 @@ export async function killProcessesOnPort(port: number): Promise<number[]> {
     }
   }
   return killed;
+}
+
+export async function terminateProcessTree(pid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    await run('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
+    return;
+  }
+  process.kill(pid, 'SIGTERM');
 }
 
 export function portReleaseHint(port: number): string {

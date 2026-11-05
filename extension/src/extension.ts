@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as cp from 'child_process';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
-import { killProcessesOnPort, portReleaseHint } from './portProcess';
+import { killProcessesOnPort, portReleaseHint, terminateProcessTree } from './portProcess';
 
 let relayClient: RelayClient | null = null;
 let approvalWatcher: ApprovalWatcher | null = null;
@@ -372,15 +372,21 @@ async function stopSession() {
   if (relayProcess) {
     const proc = relayProcess;
     relayProcess = null;
-    proc.kill('SIGTERM');
-    // Force-kill if it doesn't exit promptly (open WS connections block graceful close).
     const pid = proc.pid;
-    setTimeout(() => {
-      if (pid) {
-        try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); log(`Force-killed relay pid ${pid}`); }
-        catch { /* already dead */ }
-      }
-    }, 1500);
+    if (pid && process.platform === 'win32') {
+      void terminateProcessTree(pid)
+        .then(() => log("Terminated relay process tree " + pid))
+        .catch((error) => log("Could not terminate relay process tree " + pid + ": " + error));
+    } else {
+      proc.kill('SIGTERM');
+      // Force-kill if it does not exit promptly (open WS connections block graceful close).
+      setTimeout(() => {
+        if (pid) {
+          try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); log("Force-killed relay pid " + pid); }
+          catch { /* already dead */ }
+        }
+      }, 1500);
+    }
   }
 
   currentToken = null;
@@ -494,7 +500,7 @@ async function showQR(context: vscode.ExtensionContext) {
 </head>
 <body>
   <h2>📱 Scan to connect your phone</h2>
-  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere. On Windows, install cloudflared first (for example with winget).</p>
+  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere. Install cloudflared first (winget on Windows, Homebrew on macOS).</p>
 
   <div class="qr-section">
     <div class="qr-label local">📶 Local WiFi</div>
@@ -510,7 +516,7 @@ async function showQR(context: vscode.ExtensionContext) {
   </div>` : `
   <div class="qr-section">
     <div class="qr-label tunnel">🌐 Cloudflare Tunnel</div>
-    <div class="spinner">⏳ Starting tunnel… (run <code>brew install cloudflared</code> if this takes too long)</div>
+    <div class="spinner">⏳ Starting tunnel… (install cloudflared first: <code>winget install Cloudflare.cloudflared</code> on Windows or <code>brew install cloudflared</code> on macOS)</div>
   </div>`}
 </body>
 </html>`;
@@ -535,7 +541,9 @@ async function installHooks(context: vscode.ExtensionContext) {
 
   // The hook scripts ship with the default port hardcoded. Inject the actually
   // configured port so hooks keep working when kiroRemote.relayPort is changed.
-  const port = vscode.workspace.getConfiguration('kiroRemote').get<number>('relayPort', 3737);
+  const config = vscode.workspace.getConfiguration('kiroRemote');
+  const port = config.get<number>('relayPort', 3737);
+  const hookTimeout = config.get<number>('approvalTimeoutSeconds', 60) + 10;
 
   for (const file of hookFiles) {
     const src = path.join(hookSrcDir, file);
@@ -545,7 +553,8 @@ async function installHooks(context: vscode.ExtensionContext) {
       continue;
     }
     const script = fs.readFileSync(src, 'utf8')
-      .replace(/http:\/\/localhost:\d+/, 'http://localhost:' + port);
+      .replace(/http:\/\/localhost:\d+/, 'http://localhost:' + port)
+      .replace(/\$RequestTimeoutSec = \d+/, '$RequestTimeoutSec = ' + hookTimeout);
     fs.writeFileSync(dest, script);
     fs.chmodSync(dest, '755');
   }
