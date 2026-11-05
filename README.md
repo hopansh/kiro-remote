@@ -90,13 +90,13 @@ server code take effect immediately.
 | Mobile WebSocket | `?token=TOKEN`; constant-time comparison; rate-limited |
 | Hook endpoints | `Authorization: Bearer TOKEN` header |
 | Push subscription | `?token=TOKEN` on VAPID key + subscribe endpoints |
-| Extension WebSocket | Loopback (`127.0.0.1`) only — never reachable remotely |
-| `/health` | Loopback only — exposes token + build id, never tunnelled |
+| Extension WebSocket | Direct loopback plus session-token authentication |
+| `/health` | Direct loopback only; forwarded/tunnel requests are rejected |
 | CORS | Localhost, RFC-1918 ranges, `*.trycloudflare.com` (HTTPS) only |
-| Rate limiting | 30 req/min per IP; loopback is always exempt |
+| Rate limiting | 30 req/min per resolved client IP; direct loopback is exempt |
 | Message size | 1 MB extension, 64 KB mobile |
 
-The token is a 6-character alphanumeric string in `~/.kiro-remote/token`.
+The token is a cryptographically random 192-bit secret stored in `~/.kiro-remote/token` and embedded in the QR URL. Legacy short tokens are rotated automatically on upgrade.
 Rotate it with **Kiro Remote: Reset Session Token** (invalidates old QR codes).
 
 ## Configuration

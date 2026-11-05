@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as cp from 'child_process';
 import * as os from 'os';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { killProcessesOnPort, portReleaseHint, terminateProcessTree } from './portProcess';
 
 let relayClient: RelayClient | null = null;
@@ -33,7 +33,7 @@ function log(msg: string) {
 }
 
 function genToken(): string {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  return randomBytes(24).toString('base64url');
 }
 
 /**
@@ -50,14 +50,15 @@ function getPersistentToken(_context: vscode.ExtensionContext): string {
     fs.mkdirSync(dir, { recursive: true });
     if (fs.existsSync(tokenFile)) {
       const t = fs.readFileSync(tokenFile, 'utf8').trim();
-      if (t) { log(`Reusing persistent token from file: ${t}`); return t; }
+      if (t.length >= 32) { log('Reusing persistent session token'); return t; }
+      if (t) log('Rotating legacy short session token');
     }
   } catch (e) {
     log(`Could not read token file: ${e}`);
   }
   const token = genToken();
   try { fs.writeFileSync(tokenFile, token); } catch (e) { log(`Could not write token file: ${e}`); }
-  log(`Generated new persistent token: ${token}`);
+  log('Generated new persistent session token');
   return token;
 }
 
@@ -198,7 +199,7 @@ async function startSession(context: vscode.ExtensionContext) {
 
   // Connect extension WS client to relay
   const timeoutSeconds = config.get<number>('approvalTimeoutSeconds', 60);
-  relayClient = new RelayClient(`ws://127.0.0.1:${port}/extension`);
+  relayClient = new RelayClient('ws://127.0.0.1:' + port + '/extension?token=' + encodeURIComponent(currentToken));
 
   try {
     await relayClient.connect();

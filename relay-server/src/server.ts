@@ -40,6 +40,24 @@ function isLoopback(ip: string): boolean {
   return clean === '127.0.0.1' || clean === '::1' || clean === 'localhost';
 }
 
+function forwardedClientIp(headers: http.IncomingHttpHeaders): string | null {
+  for (const name of ['cf-connecting-ip', 'x-forwarded-for', 'x-real-ip'] as const) {
+    const raw = headers[name];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    const first = value?.split(',')[0]?.trim();
+    if (first) return first.replace('::ffff:', '');
+  }
+  return null;
+}
+
+function clientIp(remoteAddress: string | undefined, headers: http.IncomingHttpHeaders): string {
+  return forwardedClientIp(headers) ?? (remoteAddress ?? 'unknown').replace('::ffff:', '');
+}
+
+function isDirectLoopback(remoteAddress: string | undefined, headers: http.IncomingHttpHeaders): boolean {
+  return isLoopback(remoteAddress ?? '') && forwardedClientIp(headers) === null && !headers.forwarded;
+}
+
 function checkRateLimit(ip: string): boolean {
   // Loopback is the local extension itself — never throttle it. The limiter
   // exists to stop remote brute-force of the token, not local polling.
@@ -115,7 +133,7 @@ export function createServer(sessionManager: SessionManager) {
   // ── Middleware: require token for all non-static, non-health routes ──
   // Token can be passed as query param (?token=X) or Authorization header (Bearer X)
   function requireToken(req: Request, res: Response, next: NextFunction) {
-    const ip = req.ip ?? 'unknown';
+    const ip = clientIp(req.socket.remoteAddress, req.headers);
 
     // Rate limit auth attempts per IP
     if (!checkRateLimit(ip)) {
@@ -163,9 +181,7 @@ export function createServer(sessionManager: SessionManager) {
   // ── Health — LOCAL ONLY (token is sensitive, never expose over tunnel) ──
   // Only responds to loopback. Remote callers get 403.
   app.get('/health', (req: Request, res: Response) => {
-    const ip = req.ip ?? '';
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    if (!isLocal) {
+    if (!isDirectLoopback(req.socket.remoteAddress, req.headers)) {
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
@@ -185,7 +201,7 @@ export function createServer(sessionManager: SessionManager) {
 
   // ── Session validation — rate-limited, no token leakage ──
   app.get('/session/:token', (req: Request, res: Response) => {
-    const ip = req.ip ?? 'unknown';
+    const ip = clientIp(req.socket.remoteAddress, req.headers);
     if (!checkRateLimit(ip)) {
       res.status(429).json({ error: 'Too many requests' });
       return;
@@ -336,14 +352,17 @@ export function createServer(sessionManager: SessionManager) {
   // ── WebSocket upgrade — auth at the transport layer ───────────
   httpServer.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
-    const clientIp = (request.socket.remoteAddress ?? 'unknown').replace('::ffff:', '');
-    rlog('ws', `Upgrade: ${url.pathname} from ${clientIp}`);
+    const remoteIp = clientIp(request.socket.remoteAddress, request.headers);
+    rlog('ws', `Upgrade: ${url.pathname} from ${remoteIp}`);
 
     if (url.pathname === '/extension') {
-      // Extension only accepts connections from loopback
-      if (clientIp !== '127.0.0.1' && clientIp !== '::1') {
-        rlog('ws', `REJECTED /extension from non-local IP ${clientIp}`);
-        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      const token = url.searchParams.get('token') ?? '';
+      const session = sessionManager.get();
+      const valid = session != null && safeTokenCompare(token, session.token) && !sessionManager.isExpired();
+      // Require both a direct loopback connection and the session secret.
+      if (!isDirectLoopback(request.socket.remoteAddress, request.headers) || !valid) {
+        rlog('ws', 'REJECTED /extension from ' + remoteIp);
+        socket.write('HTTP/1.1 403 Forbidden' + String.fromCharCode(13, 10, 13, 10));
         socket.destroy();
         return;
       }
@@ -353,8 +372,8 @@ export function createServer(sessionManager: SessionManager) {
 
     } else if (url.pathname === '/mobile') {
       // Rate-limit mobile connection attempts
-      if (!checkRateLimit(clientIp)) {
-        rlog('ws', `REJECTED /mobile from ${clientIp} — rate limited`);
+      if (!checkRateLimit(remoteIp)) {
+        rlog('ws', `REJECTED /mobile from ${remoteIp} — rate limited`);
         socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
         socket.destroy();
         return;
@@ -362,7 +381,7 @@ export function createServer(sessionManager: SessionManager) {
       const token = url.searchParams.get('token') ?? '';
       const session = sessionManager.get();
       const valid = session != null && safeTokenCompare(token, session.token) && !sessionManager.isExpired();
-      rlog('ws', `Mobile connect: valid=${valid} from ${clientIp}`);
+      rlog('ws', `Mobile connect: valid=${valid} from ${remoteIp}`);
       if (!valid) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
