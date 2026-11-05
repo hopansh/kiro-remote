@@ -17,13 +17,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
-
-const KIRO_AGENT_BASE = path.join(
-  os.homedir(),
-  'Library', 'Application Support', 'Kiro', 'User',
-  'globalStorage', 'kiro.kiroagent'
-);
+import { KIRO_AGENT_BASE } from './kiroPaths';
 const EXEC_SUBDIR = '414d1636299d2b9e4ce7e17fb11f63e9';
 
 // Cache: executionId -> response text

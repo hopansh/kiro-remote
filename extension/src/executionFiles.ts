@@ -11,13 +11,8 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
-
-export const KIRO_AGENT_BASE = path.join(
-  os.homedir(),
-  'Library', 'Application Support', 'Kiro', 'User',
-  'globalStorage', 'kiro.kiroagent'
-);
+import { KIRO_AGENT_BASE } from './kiroPaths';
+export { KIRO_AGENT_BASE } from './kiroPaths';
 export const EXEC_SUBDIR = '414d1636299d2b9e4ce7e17fb11f63e9';
 
 export interface NewestExecution {

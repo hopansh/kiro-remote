@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as cp from 'child_process';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
+import { killProcessesOnPort, portReleaseHint } from './portProcess';
 
 let relayClient: RelayClient | null = null;
 let approvalWatcher: ApprovalWatcher | null = null;
@@ -328,18 +329,11 @@ async function killStaleServer(port: number): Promise<void> {
 
   log(`Port ${port} in use by a stale server — terminating`);
 
-  // Kill everything on the port (may be several attempts).
-  const killOnce = () => new Promise<void>((resolve) => {
-    cp.exec(`lsof -ti tcp:${port}`, (_err, stdout) => {
-      const pids = stdout.split('\n').map(s => s.trim()).filter(Boolean);
-      if (pids.length === 0) { resolve(); return; }
-      for (const pid of pids) {
-        try { process.kill(parseInt(pid, 10), 'SIGKILL'); log(`Killed stale pid ${pid}`); }
-        catch (e) { log(`Could not kill pid ${pid}: ${e}`); }
-      }
-      resolve();
-    });
-  });
+  // Kill every listener on the port (may take several attempts).
+  const killOnce = async () => {
+    const pids = await killProcessesOnPort(port);
+    for (const pid of pids) log("Killed stale pid " + pid);
+  };
 
   // Retry kill + wait until the port stops responding (max ~6s).
   const deadline = Date.now() + 6000;
@@ -355,7 +349,7 @@ async function killStaleServer(port: number): Promise<void> {
   log(`WARNING: could not free port ${port} after 6s — the old server may be owned by another process`);
   throw new Error(
     `Port ${port} is occupied by a server we cannot stop. ` +
-    `Run "lsof -ti tcp:${port} | xargs kill -9" in a terminal, or change kiroRemote.relayPort in settings.`
+    portReleaseHint(port)
   );
 }
 
@@ -500,7 +494,7 @@ async function showQR(context: vscode.ExtensionContext) {
 </head>
 <body>
   <h2>📱 Scan to connect your phone</h2>
-  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere.</p>
+  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere. On Windows, install cloudflared first (for example with winget).</p>
 
   <div class="qr-section">
     <div class="qr-label local">📶 Local WiFi</div>
@@ -534,12 +528,10 @@ async function installHooks(context: vscode.ExtensionContext) {
   fs.mkdirSync(hooksDir, { recursive: true });
 
   const hookSrcDir = context.asAbsolutePath('hooks');
-  const hookFiles = [
-    'pre-tool-use.sh',
-    'post-tool-use.sh',
-    'task-start.sh',
-    'task-complete.sh',
-  ];
+  const isWindows = process.platform === 'win32';
+  const hookFiles = isWindows
+    ? ['kiro-remote-hook.ps1']
+    : ['pre-tool-use.sh', 'post-tool-use.sh', 'task-start.sh', 'task-complete.sh'];
 
   // The hook scripts ship with the default port hardcoded. Inject the actually
   // configured port so hooks keep working when kiroRemote.relayPort is changed.
@@ -553,34 +545,36 @@ async function installHooks(context: vscode.ExtensionContext) {
       continue;
     }
     const script = fs.readFileSync(src, 'utf8')
-      .replace(/RELAY_URL="http:\/\/localhost:\d+"/, `RELAY_URL="http://localhost:${port}"`);
+      .replace(/http:\/\/localhost:\d+/, 'http://localhost:' + port);
     fs.writeFileSync(dest, script);
     fs.chmodSync(dest, '755');
   }
 
   // Write the hooks.json config
+  const windowsHook = (endpoint: string, blocking = false) =>
+    'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .kiro/hooks/kiro-remote-hook.ps1 -Endpoint ' + endpoint + (blocking ? ' -Blocking' : '');
   const hooksConfigPath = path.join(hooksDir, 'hooks.json');
   const hooksConfig = {
     hooks: [
       {
         name: 'remote-pre-tool',
         trigger: { type: 'preToolUse' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/pre-tool-use.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('pre-tool-use', true) : 'bash .kiro/hooks/pre-tool-use.sh' },
       },
       {
         name: 'remote-post-tool',
         trigger: { type: 'postToolUse' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/post-tool-use.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('post-tool-use') : 'bash .kiro/hooks/post-tool-use.sh' },
       },
       {
         name: 'remote-task-start',
         trigger: { type: 'specTaskStart' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/task-start.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('task-start') : 'bash .kiro/hooks/task-start.sh' },
       },
       {
         name: 'remote-task-complete',
         trigger: { type: 'specTaskComplete' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/task-complete.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('task-complete') : 'bash .kiro/hooks/task-complete.sh' },
       },
     ],
   };

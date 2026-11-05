@@ -17,16 +17,17 @@ from a mobile PWA that works over WiFi or anywhere via Cloudflare Tunnel.
 - **Background push notifications** — get a push notification when Kiro needs approval, even with the app closed (over the HTTPS tunnel)
 - **Remote access** — Cloudflare Tunnel provides a public HTTPS URL automatically, no account needed
 - **PWA install** — tap "Install for full-screen" in the app banner to add it to your home screen and get a true full-screen experience with no browser address bar
-- **Sleep prevention** — automatically keeps your Mac awake while a session is active via `caffeinate`
+- **Sleep prevention** — automatically keeps your Mac awake while a session is active via `caffeinate` (macOS only)
 - **Multi-window** — multiple Kiro workspaces can be open simultaneously; status is aggregated, messages route to the right window
 - **Secure** — token-authenticated WebSocket, rate limiting, timing-safe comparisons, build-verified relay replacement on reinstall
 
 ## Requirements
 
-- macOS (Windows/Linux not yet supported)
+- macOS or Windows (Linux not yet supported)
 - [Kiro IDE](https://kiro.dev)
 - Node.js 20+ (for building from source)
 - Android or iOS with Chrome/Safari
+\nOn Windows, install `cloudflared` and ensure `cloudflared.exe` is on `PATH` before starting a tunnel (for example, `winget install Cloudflare.cloudflared`). Local WiFi access does not require it.
 
 ## Quick Start
 

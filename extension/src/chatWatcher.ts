@@ -11,16 +11,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { RelayClient } from './relayClient';
 import { randomUUID } from 'crypto';
 import { getExecutionResponse, buildExecutionCache } from './executionReader';
 
-const KIRO_SESSIONS_BASE = path.join(
-  os.homedir(),
-  'Library', 'Application Support', 'Kiro', 'User',
-  'globalStorage', 'kiro.kiroagent', 'workspace-sessions'
-);
+import { KIRO_SESSIONS_BASE } from './kiroPaths';
 
 export interface ChatMessage {
   id: string;

@@ -4,9 +4,9 @@ Thanks for your interest! Here's everything you need to get started.
 
 ## Platform Note
 
-Kiro Remote Control is currently **macOS-only**. It reads chat session and execution
-log files from `~/Library/Application Support/Kiro/...`, uses `caffeinate` for
-sleep prevention, and `lsof` for port management. Contributions that add
+Kiro Remote Control currently supports **macOS and Windows**. It reads chat session and execution
+log files from `~/Library/Application Support/Kiro/...`, uses `caffeinate` on macOS for
+sleep prevention, and platform-specific tools for port management. Contributions that add
 Windows/Linux support are welcome.
 
 ---
@@ -85,7 +85,7 @@ push notifications.
 
 ### Prerequisites
 
-- macOS
+- macOS or Windows
 - Node.js 20+
 - Kiro IDE (for end-to-end testing)
 
@@ -357,7 +357,7 @@ environment variables:
 | `kiroRemote.approvalTimeoutSeconds` | `KIRO_REMOTE_APPROVAL_TIMEOUT` | `60` | Relay approval coordinator + phone countdown |
 | `kiroRemote.sessionTimeoutMinutes` | `KIRO_REMOTE_SESSION_TIMEOUT` (in seconds) | `60` | Session expiry; `/session/:token`, WS `session_info` |
 | `kiroRemote.relayPort` | `PORT` | `3737` | Relay listen port |
-| `kiroRemote.preventSleep` | (macOS `caffeinate`) | `true` | Spawns `caffeinate -i -s -m` while session is active |
+| `kiroRemote.preventSleep` | (macOS `caffeinate`; no-op on Windows) | `true` | Spawns `caffeinate -i -s -m` while session is active |
 
 The phone displays a live session countdown (`session Nm` in the header) and
 auto-shows the expired screen when it hits zero.
