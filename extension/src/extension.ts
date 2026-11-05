@@ -338,7 +338,11 @@ async function killStaleServer(port: number): Promise<void> {
   // Retry kill + wait until the port stops responding (max ~6s).
   const deadline = Date.now() + 6000;
   while (Date.now() < deadline) {
-    await killOnce();
+    try {
+      await killOnce();
+    } catch (error) {
+      log("Could not terminate stale relay listener: " + error);
+    }
     await new Promise(r => setTimeout(r, 400));
     if (!(await isAlive())) {
       log(`Port ${port} is now free`);
@@ -374,9 +378,12 @@ async function stopSession() {
     relayProcess = null;
     const pid = proc.pid;
     if (pid && process.platform === 'win32') {
-      void terminateProcessTree(pid)
-        .then(() => log("Terminated relay process tree " + pid))
-        .catch((error) => log("Could not terminate relay process tree " + pid + ": " + error));
+      try {
+        await terminateProcessTree(pid);
+        log("Terminated relay process tree " + pid);
+      } catch (error) {
+        log("Could not terminate relay process tree " + pid + ": " + error);
+      }
     } else {
       proc.kill('SIGTERM');
       // Force-kill if it does not exit promptly (open WS connections block graceful close).
@@ -650,6 +657,6 @@ async function waitForServer(port: number, token: string, maxWaitMs = 12000): Pr
   throw new Error(`Relay not ready on port ${port}: ${lastErr}`);
 }
 
-export function deactivate() {
-  void stopSession();
+export function deactivate(): Thenable<void> {
+  return stopSession();
 }

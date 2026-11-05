@@ -21,9 +21,9 @@ export async function killProcessesOnPort(port: number): Promise<number[]> {
     const pids = new Set<number>();
     for (const line of output.split(/\r?\n/)) {
       const columns = line.trim().split(/\s+/);
-      if (columns.length < 5 || columns[0].toUpperCase() !== 'TCP') continue;
-      if (!columns[1].endsWith(`:${port}`) || columns[3].toUpperCase() !== 'LISTENING') continue;
-      const pid = Number(columns[4]);
+      if (columns.length < 4 || columns[0].toUpperCase() !== 'TCP') continue;
+      if (!columns[1].endsWith(`:${port}`)) continue;
+      const pid = Number(columns[columns.length - 1]);
       if (Number.isInteger(pid) && pid > 0) pids.add(pid);
     }
     for (const pid of pids) {
