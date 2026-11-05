@@ -10,7 +10,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as cp from 'child_process';
 import * as os from 'os';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import { killProcessesOnPort, portReleaseHint, terminateProcessTree } from './portProcess';
 
 let relayClient: RelayClient | null = null;
 let approvalWatcher: ApprovalWatcher | null = null;
@@ -32,7 +33,7 @@ function log(msg: string) {
 }
 
 function genToken(): string {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  return randomBytes(24).toString('base64url');
 }
 
 /**
@@ -49,14 +50,15 @@ function getPersistentToken(_context: vscode.ExtensionContext): string {
     fs.mkdirSync(dir, { recursive: true });
     if (fs.existsSync(tokenFile)) {
       const t = fs.readFileSync(tokenFile, 'utf8').trim();
-      if (t) { log(`Reusing persistent token from file: ${t}`); return t; }
+      if (t.length >= 32) { log('Reusing persistent session token'); return t; }
+      if (t) log('Rotating legacy short session token');
     }
   } catch (e) {
     log(`Could not read token file: ${e}`);
   }
   const token = genToken();
   try { fs.writeFileSync(tokenFile, token); } catch (e) { log(`Could not write token file: ${e}`); }
-  log(`Generated new persistent token: ${token}`);
+  log('Generated new persistent session token');
   return token;
 }
 
@@ -197,7 +199,7 @@ async function startSession(context: vscode.ExtensionContext) {
 
   // Connect extension WS client to relay
   const timeoutSeconds = config.get<number>('approvalTimeoutSeconds', 60);
-  relayClient = new RelayClient(`ws://127.0.0.1:${port}/extension`);
+  relayClient = new RelayClient('ws://127.0.0.1:' + port + '/extension?token=' + encodeURIComponent(currentToken));
 
   try {
     await relayClient.connect();
@@ -328,23 +330,20 @@ async function killStaleServer(port: number): Promise<void> {
 
   log(`Port ${port} in use by a stale server — terminating`);
 
-  // Kill everything on the port (may be several attempts).
-  const killOnce = () => new Promise<void>((resolve) => {
-    cp.exec(`lsof -ti tcp:${port}`, (_err, stdout) => {
-      const pids = stdout.split('\n').map(s => s.trim()).filter(Boolean);
-      if (pids.length === 0) { resolve(); return; }
-      for (const pid of pids) {
-        try { process.kill(parseInt(pid, 10), 'SIGKILL'); log(`Killed stale pid ${pid}`); }
-        catch (e) { log(`Could not kill pid ${pid}: ${e}`); }
-      }
-      resolve();
-    });
-  });
+  // Kill every listener on the port (may take several attempts).
+  const killOnce = async () => {
+    const pids = await killProcessesOnPort(port);
+    for (const pid of pids) log("Killed stale pid " + pid);
+  };
 
   // Retry kill + wait until the port stops responding (max ~6s).
   const deadline = Date.now() + 6000;
   while (Date.now() < deadline) {
-    await killOnce();
+    try {
+      await killOnce();
+    } catch (error) {
+      log("Could not terminate stale relay listener: " + error);
+    }
     await new Promise(r => setTimeout(r, 400));
     if (!(await isAlive())) {
       log(`Port ${port} is now free`);
@@ -355,7 +354,7 @@ async function killStaleServer(port: number): Promise<void> {
   log(`WARNING: could not free port ${port} after 6s — the old server may be owned by another process`);
   throw new Error(
     `Port ${port} is occupied by a server we cannot stop. ` +
-    `Run "lsof -ti tcp:${port} | xargs kill -9" in a terminal, or change kiroRemote.relayPort in settings.`
+    portReleaseHint(port)
   );
 }
 
@@ -378,15 +377,24 @@ async function stopSession() {
   if (relayProcess) {
     const proc = relayProcess;
     relayProcess = null;
-    proc.kill('SIGTERM');
-    // Force-kill if it doesn't exit promptly (open WS connections block graceful close).
     const pid = proc.pid;
-    setTimeout(() => {
-      if (pid) {
-        try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); log(`Force-killed relay pid ${pid}`); }
-        catch { /* already dead */ }
+    if (pid && process.platform === 'win32') {
+      try {
+        await terminateProcessTree(pid);
+        log("Terminated relay process tree " + pid);
+      } catch (error) {
+        log("Could not terminate relay process tree " + pid + ": " + error);
       }
-    }, 1500);
+    } else {
+      proc.kill('SIGTERM');
+      // Force-kill if it does not exit promptly (open WS connections block graceful close).
+      setTimeout(() => {
+        if (pid) {
+          try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); log("Force-killed relay pid " + pid); }
+          catch { /* already dead */ }
+        }
+      }, 1500);
+    }
   }
 
   currentToken = null;
@@ -500,7 +508,7 @@ async function showQR(context: vscode.ExtensionContext) {
 </head>
 <body>
   <h2>📱 Scan to connect your phone</h2>
-  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere.</p>
+  <p>Use the local QR on the same WiFi, or the tunnel QR from anywhere. Install cloudflared first (winget on Windows, Homebrew on macOS).</p>
 
   <div class="qr-section">
     <div class="qr-label local">📶 Local WiFi</div>
@@ -516,7 +524,7 @@ async function showQR(context: vscode.ExtensionContext) {
   </div>` : `
   <div class="qr-section">
     <div class="qr-label tunnel">🌐 Cloudflare Tunnel</div>
-    <div class="spinner">⏳ Starting tunnel… (run <code>brew install cloudflared</code> if this takes too long)</div>
+    <div class="spinner">⏳ Starting tunnel… (install cloudflared first: <code>winget install Cloudflare.cloudflared</code> on Windows or <code>brew install cloudflared</code> on macOS)</div>
   </div>`}
 </body>
 </html>`;
@@ -534,16 +542,16 @@ async function installHooks(context: vscode.ExtensionContext) {
   fs.mkdirSync(hooksDir, { recursive: true });
 
   const hookSrcDir = context.asAbsolutePath('hooks');
-  const hookFiles = [
-    'pre-tool-use.sh',
-    'post-tool-use.sh',
-    'task-start.sh',
-    'task-complete.sh',
-  ];
+  const isWindows = process.platform === 'win32';
+  const hookFiles = isWindows
+    ? ['kiro-remote-hook.ps1']
+    : ['pre-tool-use.sh', 'post-tool-use.sh', 'task-start.sh', 'task-complete.sh'];
 
   // The hook scripts ship with the default port hardcoded. Inject the actually
   // configured port so hooks keep working when kiroRemote.relayPort is changed.
-  const port = vscode.workspace.getConfiguration('kiroRemote').get<number>('relayPort', 3737);
+  const config = vscode.workspace.getConfiguration('kiroRemote');
+  const port = config.get<number>('relayPort', 3737);
+  const hookTimeout = config.get<number>('approvalTimeoutSeconds', 60) + 10;
 
   for (const file of hookFiles) {
     const src = path.join(hookSrcDir, file);
@@ -553,34 +561,37 @@ async function installHooks(context: vscode.ExtensionContext) {
       continue;
     }
     const script = fs.readFileSync(src, 'utf8')
-      .replace(/RELAY_URL="http:\/\/localhost:\d+"/, `RELAY_URL="http://localhost:${port}"`);
+      .replace(/http:\/\/localhost:\d+/, 'http://localhost:' + port)
+      .replace(/\$RequestTimeoutSec = \d+/, '$RequestTimeoutSec = ' + hookTimeout);
     fs.writeFileSync(dest, script);
     fs.chmodSync(dest, '755');
   }
 
   // Write the hooks.json config
+  const windowsHook = (endpoint: string, blocking = false) =>
+    'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .kiro/hooks/kiro-remote-hook.ps1 -Endpoint ' + endpoint + (blocking ? ' -Blocking' : '');
   const hooksConfigPath = path.join(hooksDir, 'hooks.json');
   const hooksConfig = {
     hooks: [
       {
         name: 'remote-pre-tool',
         trigger: { type: 'preToolUse' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/pre-tool-use.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('pre-tool-use', true) : 'bash .kiro/hooks/pre-tool-use.sh' },
       },
       {
         name: 'remote-post-tool',
         trigger: { type: 'postToolUse' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/post-tool-use.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('post-tool-use') : 'bash .kiro/hooks/post-tool-use.sh' },
       },
       {
         name: 'remote-task-start',
         trigger: { type: 'specTaskStart' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/task-start.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('task-start') : 'bash .kiro/hooks/task-start.sh' },
       },
       {
         name: 'remote-task-complete',
         trigger: { type: 'specTaskComplete' },
-        action: { type: 'shell', command: 'bash .kiro/hooks/task-complete.sh' },
+        action: { type: 'shell', command: isWindows ? windowsHook('task-complete') : 'bash .kiro/hooks/task-complete.sh' },
       },
     ],
   };
@@ -647,6 +658,6 @@ async function waitForServer(port: number, token: string, maxWaitMs = 12000): Pr
   throw new Error(`Relay not ready on port ${port}: ${lastErr}`);
 }
 
-export function deactivate() {
-  void stopSession();
+export function deactivate(): Thenable<void> {
+  return stopSession();
 }

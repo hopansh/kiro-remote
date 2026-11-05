@@ -6,7 +6,7 @@ import * as fs from 'fs';
 
 const execFileAsync = promisify(execFile);
 const INSTALL_DIR = path.join(os.homedir(), '.kiro-remote');
-const BIN = path.join(INSTALL_DIR, 'cloudflared');
+const BIN = path.join(INSTALL_DIR, process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
 
 /** Returns a path to a working cloudflared, downloading+extracting if needed. */
 async function ensureCloudflared(): Promise<string | null> {
@@ -26,7 +26,11 @@ async function ensureCloudflared(): Promise<string | null> {
     }
   }
 
-  // 3. Download the official .tgz and extract
+  // 3. Download the official binary for the current platform.
+  if (process.platform === 'win32') {
+    console.warn('Automatic cloudflared download is not available on Windows; install it with winget or add cloudflared.exe to PATH.');
+    return null;
+  }
   try {
     fs.mkdirSync(INSTALL_DIR, { recursive: true });
     const arch = os.arch() === 'arm64' ? 'arm64' : 'amd64';
@@ -59,7 +63,7 @@ export class TunnelManager {
   async start(port: number): Promise<string> {
     const bin = await ensureCloudflared();
     if (!bin) {
-      throw new Error('cloudflared unavailable (install manually: brew install cloudflared)');
+      throw new Error('cloudflared unavailable (install it manually and ensure it is on PATH)');
     }
 
     return new Promise((resolve, reject) => {

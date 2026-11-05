@@ -4,17 +4,12 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { RelayClient } from './relayClient';
 import { KiroSession } from './types';
 import { decodeWorkspaceKey, extractTextStatic } from './chatWatcher';
 import { randomUUID } from 'crypto';
 
-const KIRO_SESSIONS_BASE = path.join(
-  os.homedir(),
-  'Library', 'Application Support', 'Kiro', 'User',
-  'globalStorage', 'kiro.kiroagent', 'workspace-sessions'
-);
+import { KIRO_SESSIONS_BASE } from './kiroPaths';
 
 function log(msg: string) {
   const ts = new Date().toISOString().substring(11, 23);

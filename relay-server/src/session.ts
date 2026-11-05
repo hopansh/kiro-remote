@@ -1,8 +1,8 @@
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 
 export interface Session {
   id: string;
-  token: string;           // short alphanumeric, shown in QR
+  token: string;           // high-entropy secret embedded in the QR URL
   createdAt: number;
   expiresAt: number;
   extensionConnected: boolean;
@@ -48,7 +48,6 @@ export class SessionManager {
   }
 
   private generateToken(): string {
-    // 6-character alphanumeric, easy to type if needed
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return randomBytes(24).toString('base64url');
   }
 }

@@ -17,29 +17,39 @@ from a mobile PWA that works over WiFi or anywhere via Cloudflare Tunnel.
 - **Background push notifications** — get a push notification when Kiro needs approval, even with the app closed (over the HTTPS tunnel)
 - **Remote access** — Cloudflare Tunnel provides a public HTTPS URL automatically, no account needed
 - **PWA install** — tap "Install for full-screen" in the app banner to add it to your home screen and get a true full-screen experience with no browser address bar
-- **Sleep prevention** — automatically keeps your Mac awake while a session is active via `caffeinate`
+- **Sleep prevention** — automatically keeps your Mac awake while a session is active via `caffeinate` (macOS only)
 - **Multi-window** — multiple Kiro workspaces can be open simultaneously; status is aggregated, messages route to the right window
 - **Secure** — token-authenticated WebSocket, rate limiting, timing-safe comparisons, build-verified relay replacement on reinstall
 
 ## Requirements
 
-- macOS (Windows/Linux not yet supported)
+- macOS or Windows (Linux not yet supported)
 - [Kiro IDE](https://kiro.dev)
 - Node.js 20+ (for building from source)
 - Android or iOS with Chrome/Safari
+
+### Windows setup
+
+Kiro Remote reads sessions from `%APPDATA%\Kiro` and uses native PowerShell hooks, so Git Bash is not required. For remote access outside your local network, install Cloudflared and restart Kiro so the updated `PATH` is picked up:
+
+```powershell
+winget install Cloudflare.cloudflared
+```
+
+Local WiFi access works without Cloudflared. Windows sleep prevention is not currently managed by the extension, so configure Windows to stay awake while you need remote access.
 
 ## Quick Start
 
 ### Install
 
 1. Download `kiro-remote-control-x.y.z.vsix` from [Releases](../../releases).
-2. In Kiro: **Cmd+Shift+P → Extensions: Install from VSIX**.
+2. In Kiro: **Command Palette → Extensions: Install from VSIX**.
 
 ### Connect
 
-1. **Cmd+Shift+P → Kiro Remote: Start Remote Session**
+1. **Command Palette → Kiro Remote: Start Remote Session**
 2. Tap **Show QR** in the notification. Two QR codes appear:
-   - 📶 **Local WiFi** — same network as your Mac
+   - 📶 **Local WiFi** — same network as your computer
    - 🌐 **Cloudflare Tunnel** — any network (ready in ~10s)
 3. Scan the appropriate QR on your phone. Open in Chrome.
 4. Tap the **"Install for full-screen"** banner (or **Add to Home Screen**) to install as a PWA and remove the browser address bar.
@@ -47,7 +57,7 @@ from a mobile PWA that works over WiFi or anywhere via Cloudflare Tunnel.
 ### Optional: enable tool approval via hooks
 
 ```
-Cmd+Shift+P → Kiro Remote: Install Hooks into Workspace
+Command Palette → Kiro Remote: Install Hooks into Workspace
 ```
 
 Copies approval hook scripts into `.kiro/hooks/`. Re-run after each extension update.
@@ -80,13 +90,13 @@ server code take effect immediately.
 | Mobile WebSocket | `?token=TOKEN`; constant-time comparison; rate-limited |
 | Hook endpoints | `Authorization: Bearer TOKEN` header |
 | Push subscription | `?token=TOKEN` on VAPID key + subscribe endpoints |
-| Extension WebSocket | Loopback (`127.0.0.1`) only — never reachable remotely |
-| `/health` | Loopback only — exposes token + build id, never tunnelled |
+| Extension WebSocket | Direct loopback plus session-token authentication |
+| `/health` | Direct loopback only; forwarded/tunnel requests are rejected |
 | CORS | Localhost, RFC-1918 ranges, `*.trycloudflare.com` (HTTPS) only |
-| Rate limiting | 30 req/min per IP; loopback is always exempt |
+| Rate limiting | 30 req/min per resolved client IP; direct loopback is exempt |
 | Message size | 1 MB extension, 64 KB mobile |
 
-The token is a 6-character alphanumeric string in `~/.kiro-remote/token`.
+The token is a cryptographically random 192-bit secret stored in `~/.kiro-remote/token` and embedded in the QR URL. Legacy short tokens are rotated automatically on upgrade.
 Rotate it with **Kiro Remote: Reset Session Token** (invalidates old QR codes).
 
 ## Configuration
@@ -97,7 +107,7 @@ Rotate it with **Kiro Remote: Reset Session Token** (invalidates old QR codes).
 | `kiroRemote.autoStart` | `false` | Start relay automatically when Kiro opens |
 | `kiroRemote.approvalTimeoutSeconds` | `60` | Seconds before a pending approval auto-denies |
 | `kiroRemote.sessionTimeoutMinutes` | `60` | Minutes a session/QR token stays valid |
-| `kiroRemote.preventSleep` | `true` | Keep your Mac awake via `caffeinate` while a session is active |
+| `kiroRemote.preventSleep` | `true` | Keep macOS awake via `caffeinate` while a session is active (no-op on Windows) |
 
 ## Commands
 
@@ -117,7 +127,7 @@ Rotate it with **Kiro Remote: Reset Session Token** (invalidates old QR codes).
 - The relay log is at `~/.kiro-remote/relay.log` (`tail -f` it for live diagnostics)
 - The tunnel URL changes on every restart; the local URL stays stable as long as your IP doesn't change
 - VAPID keys are persisted to `~/.kiro-remote/vapid.json` — existing push subscriptions survive relay restarts
-- `caffeinate` runs automatically while a session is active; disable with `kiroRemote.preventSleep: false` if you'd rather manage sleep yourself
+- On macOS, `caffeinate` runs automatically while a session is active; disable with `kiroRemote.preventSleep: false` if you'd rather manage sleep yourself
 
 ## Development
 

@@ -23,12 +23,30 @@ Kiro IDE ──── Extension ──── Relay Server ──── Mobile PW
 
 ---
 
+## Requirements
+
+- macOS or Windows (Linux is not yet supported)
+- Kiro IDE
+- Android or iOS with Chrome or Safari
+
+### Windows setup
+
+Windows uses `%APPDATA%\Kiro` for session data and native PowerShell scripts for workspace hooks; Git Bash is not required. Install Cloudflared before using the tunnel from outside your local network, then restart Kiro:
+
+```powershell
+winget install Cloudflare.cloudflared
+```
+
+Local WiFi access does not require Cloudflared. Keep the Windows PC awake while a remote session is needed.
+
+---
+
 ## Quick Start
 
 ### 1. Start a Remote Session
 
 ```
-Cmd+Shift+P → Kiro Remote: Start Remote Session
+Command Palette → Kiro Remote: Start Remote Session
 ```
 
 The relay server starts and a notification appears in the IDE.
@@ -36,11 +54,11 @@ The relay server starts and a notification appears in the IDE.
 ### 2. Scan the QR Code
 
 ```
-Cmd+Shift+P → Kiro Remote: Show QR Code
+Command Palette → Kiro Remote: Show QR Code
 ```
 
 Two QR codes appear side by side:
-- 📶 **Local WiFi** — use when your phone and Mac are on the same network
+- 📶 **Local WiFi** — use when your phone and computer are on the same network
 - 🌐 **Cloudflare Tunnel** — use from any network, no account needed (starts within ~10s)
 
 Scan with your phone's camera. The mobile app opens immediately.
@@ -48,7 +66,7 @@ Scan with your phone's camera. The mobile app opens immediately.
 ### 3. Install Hooks (optional but recommended)
 
 ```
-Cmd+Shift+P → Kiro Remote: Install Hooks into Workspace
+Command Palette → Kiro Remote: Install Hooks into Workspace
 ```
 
 Installs `.kiro/hooks/` scripts that give you real-time tool approval prompts and
@@ -58,7 +76,7 @@ using your session token — **re-run this command after every extension update*
 ### 4. Stop the Session
 
 ```
-Cmd+Shift+P → Kiro Remote: Stop Remote Session
+Command Palette → Kiro Remote: Stop Remote Session
 ```
 
 ---
@@ -146,13 +164,12 @@ the extension). Close the old tab/PWA, re-scan the new QR from **Show QR Code**.
 the latest version of the extension.
 
 **No chat history** — Make sure you've run at least one Kiro agent session. Check
-the "Kiro Remote" output panel (`Cmd+Shift+U`) for `[kiro-remote:chat]` log lines.
+the "Kiro Remote" output panel (open **View → Output**) for `[kiro-remote:chat]` log lines.
 
 **Hook approvals not working** — Run **Install Hooks into Workspace** again after
 updating the extension. The hooks need the updated authentication logic.
 
-**Tunnel not starting** — Install cloudflared via `brew install cloudflared`,
-then restart the session.
+**Tunnel not starting** — On macOS, install Cloudflared with `brew install cloudflared`. On Windows, run `winget install Cloudflare.cloudflared`, restart Kiro, and confirm `cloudflared.exe` is on `PATH`.
 
 ---
 
